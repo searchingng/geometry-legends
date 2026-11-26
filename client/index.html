@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Moba2D</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <div id="hud">
+      <div class="hud-left">
+        <span id="hud-status"></span>
+        <div id="hud-room" hidden>
+          Room <strong id="hud-room-code"></strong>
+          <button id="hud-copy-link" type="button">Copy link</button>
+        </div>
+      </div>
+      <span id="hud-stats"></span>
+    </div>
+
+    <div id="lobby" hidden>
+      <div class="lobby-card">
+        <h1>Moba2D</h1>
+        <button id="lobby-create" type="button" class="primary">Create game</button>
+        <div class="lobby-divider">or join / create with a code</div>
+        <form id="lobby-join">
+          <input id="lobby-code" placeholder="ABCDE" autocomplete="off" spellcheck="false" />
+          <button type="submit">Join</button>
+        </form>
+        <p id="lobby-error" role="alert"></p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,143 @@
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #070a12;
+  color: #e6ecff;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid #4f6bff;
+  background: #141c36;
+  border-radius: 6px;
+  padding: 8px 14px;
+}
+
+button:hover:not(:disabled) {
+  background: #1f2a52;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+#hud {
+  position: fixed;
+  top: 12px;
+  left: 16px;
+  right: 16px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 14px;
+  pointer-events: none;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
+}
+
+.hud-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#hud-room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#hud-room-code {
+  font-size: 18px;
+  letter-spacing: 3px;
+  color: #7dffb0;
+}
+
+#hud-copy-link {
+  pointer-events: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+#hud-stats {
+  opacity: 0.75;
+}
+
+#lobby {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(5, 7, 13, 0.85);
+}
+
+.lobby-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(320px, calc(100vw - 32px));
+  padding: 28px;
+  border: 1px solid #2a3768;
+  border-radius: 12px;
+  background: #0d1322;
+  box-shadow: 0 0 40px rgba(79, 107, 255, 0.2);
+}
+
+.lobby-card h1 {
+  margin: 0 0 6px;
+  text-align: center;
+  letter-spacing: 4px;
+  color: #9fb4ff;
+}
+
+.lobby-card .primary {
+  padding: 12px;
+  background: #2a3a8f;
+}
+
+.lobby-divider {
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.6;
+}
+
+#lobby-join {
+  display: flex;
+  gap: 8px;
+}
+
+#lobby-code {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid #2a3768;
+  border-radius: 6px;
+  background: #070a12;
+  text-transform: uppercase;
+  letter-spacing: 3px;
+}
+
+#lobby-error {
+  min-height: 1.2em;
+  margin: 0;
+  font-size: 13px;
+  color: #ff7a7a;
+}
