@@ -1,6 +1,7 @@
 import { Client, type Room } from "colyseus.js";
 import {
   DEFAULT_SERVER_PORT,
+  IDENTITY_API_PATH,
   PICK_TIMEOUT_CLOSE_CODE,
   ROOMS_API_PATH,
   ROOM_NAME,
@@ -35,9 +36,17 @@ export function connectionOptionsFromEnvironment(): ConnectionOptions {
 }
 
 export function roomsApiUrl(options: ConnectionOptions): string {
+  return apiUrl(options, ROOMS_API_PATH);
+}
+
+export function defaultIdentityUrl(options: ConnectionOptions): string {
+  return apiUrl(options, `${IDENTITY_API_PATH}/default`);
+}
+
+function apiUrl(options: ConnectionOptions, path: string): string {
   const url = new URL(options.serverUrl);
   url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  url.pathname = ROOMS_API_PATH;
+  url.pathname = path;
   url.search = "";
   return url.toString();
 }
@@ -65,9 +74,9 @@ export class Connection {
     this.attach(room);
   }
 
-  static async create(options: ConnectionOptions, roomCode?: string): Promise<Connection> {
+  static async create(options: ConnectionOptions, join: JoinOptions, roomCode?: string): Promise<Connection> {
     const client = new Client(options.serverUrl);
-    const room = await client.create(ROOM_NAME, roomCode ? { roomCode } : {});
+    const room = await client.create(ROOM_NAME, roomCode ? { ...join, roomCode } : join);
     return new Connection(client, room, options, false);
   }
 

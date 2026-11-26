@@ -13,5 +13,5 @@ export interface HeroView {
 }
 
 export interface HeroRenderer {
-  create(hero: HeroDefinition, isLocal: boolean): HeroView;
+  create(hero: HeroDefinition, isLocal: boolean, name: string): HeroView;
 }

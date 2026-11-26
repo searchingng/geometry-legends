@@ -2,7 +2,13 @@
 
 Browser 1v1 MOBA. Authoritative Colyseus server, Three.js client with a fixed tilted camera, game logic is pure 2D in `shared/`. 10 geometric heroes, 3 skills each (Q/E/R), fog of war, bushes, spectators.
 
-User writes in Uzbek: answer in Uzbek. Discuss the approach first, code after an explicit go-ahead. Do not test in the browser unless asked; run `npm run typecheck` and `npm test` instead. Do not commit unless asked.
+User writes in Uzbek: answer in Uzbek. Discuss the approach first, code after an explicit go-ahead. Do not commit unless asked.
+
+## Testing rule (strict)
+
+- Never test UI or anything in a browser (browser pane, Chrome, Playwright, screenshots, bot clients, starting the dev server to check) unless the user explicitly says to in that message. Reason: it costs too many tokens.
+- After a change, run only `npm run typecheck` and `npm test`.
+- When finishing, list what needs manual checking (UI, visuals, gameplay feel, multiplayer flow) and ask the user to test it themselves.
 
 ## Commands
 
@@ -29,27 +35,35 @@ npm workspaces: `shared` (`@moba/shared`, imported by both sides), `server`, `cl
 | `vision.ts` | line of sight, bush hiding, visibility rays |
 | `targeting.ts` / `combat.ts` | basic attack target choice and range |
 | `roomCode.ts` | room code alphabet/validation |
+| `username.ts` | `normalizeUsername`, user key format, identity API types, name error messages |
+| `admin.ts` | admin API path and response types (`AdminUser`, `AdminMatch`, `AdminPage`) |
 
 ### server/src
 | File | Holds |
 |---|---|
-| `index.ts` | HTTP server: `/healthz`, `/api/rooms`, static client, Colyseus `duel` room |
+| `index.ts` | HTTP server: `/healthz`, `/api/rooms`, `/api/identity`, `/api/admin`, static client (`/admin` → `admin.html`), Colyseus `duel` room; loads `server/.env` if present |
 | `DuelRoom.ts` | the room: join/leave/reconnect, seats vs spectators, hero pick + timeout, input queue, tick `update()`, attacks, kill/respawn, per-viewer snapshots (`snapshotFor`, `spectatorSnapshot`) |
 | `match/MatchController.ts` | phases: waiting → countdown → playing → ended, score, rematch |
 | `skills/SkillSystem.ts` | casting, projectiles, zones, damage (`dealDamage`) |
 | `skills/CombatStatus.ts` | stun, slow, shield, spawn protection, forced motion |
 | `VisionSystem.ts` | who sees whom each tick (fog of war) |
 | `roomList.ts` / `roomCode.ts` | lobby room list API, room code allocation |
+| `db/database.ts` | SQLite (`node:sqlite`) schema: `users` (username = ID, key hash), `user_ips`, `counters`, `matches`, `match_players` |
+| `db/UserStore.ts` / `db/MatchHistory.ts` / `db/AdminQueries.ts` | name claim + IP log, match writes, admin lists (search, paging) |
+| `db/services.ts` | opened stores for the process (`services()`), `recordMatch` |
+| `http/` | `json.ts` (body, client IP via `CLIENT_IP_HEADER`), `RateLimiter.ts`, `identityApi.ts` (default `user_{n}`), `adminApi.ts` |
+| `admin/AdminAuth.ts` | scrypt password check, signed session cookie; `hashPasswordCli.ts` = `npm run admin:password -w server` |
 
 ### client/src
 | Area | Files |
 |---|---|
-| entry | `main.ts` (lobby → connection → game), `index.html`, `style.css` |
+| entry | `main.ts` (lobby → connection → game), `index.html`, `style.css`; `vite.config.ts` (two pages, `/api/admin` dev proxy) |
+| admin page | `admin.html`, `admin/main.ts` (login, tabs, search, paging), `admin/api.ts`, `admin/tables.ts`, `admin/admin.css` |
 | network | `net/Connection.ts` (join/create/reconnect/leave, rooms API URL) |
 | game loop | `game/Game.ts` (snapshot handling, frame loop, HUD sync, spectator mode), `FrameContext.ts`, `SnapshotBuffer.ts` (interpolation), `LocalPredictor.ts` (own-hero prediction), `SkillCasting.ts`, `AttackTargeting.ts`, `SpectatorCamera.ts` |
 | input | `input/keyboard.ts`, `input/Pointer.ts` |
 | render (Three.js) | `SceneRenderer.ts` (camera, scene), `ArenaView.ts`, `BushView.ts`, `VisionFog.ts`, `MeshHeroRenderer.ts` + `HeroShapes.ts` (implements `HeroRenderer`), `Skill*Effects.ts`, `SkillIndicators.ts`, `IndicatorGeometry.ts`, `AttackEffects.ts`, `StatusIndicators.ts`, `TargetingView.ts`, `DynamicResolution.ts`, `gpu.ts` |
-| UI (DOM) | `Lobby.ts`, `RoomList.ts`, `HeroPicker.ts`, `Hud.ts`, `SkillBar.ts`, `MatchHud.ts` (end screen, rematch, back to menu), `SpectatorHud.ts`, `Minimap.ts`, `CombatFeedback.ts`, `FloatingNumbers.ts`, `ReconnectOverlay.ts`; CSS next to them |
+| UI (DOM) | `Lobby.ts`, `UsernameField.ts` (username input, per-name keys in localStorage), `RoomList.ts`, `HeroPicker.ts`, `Hud.ts`, `SkillBar.ts`, `MatchHud.ts` (end screen, rematch, back to menu), `SpectatorHud.ts`, `Minimap.ts`, `CombatFeedback.ts`, `FloatingNumbers.ts`, `ReconnectOverlay.ts`; CSS next to them |
 | audio | `audio/Sfx.ts` (generated sounds) |
 
 ## Where to change what

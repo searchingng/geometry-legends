@@ -1,5 +1,6 @@
-import { Room, type Client } from "colyseus";
+import { Room, type AuthContext, type Client } from "colyseus";
 import {
+  ALREADY_IN_ROOM,
   ARENA,
   INPUT_BUFFER_TICKS,
   MAX_PLAYERS,
@@ -10,6 +11,7 @@ import {
   PICK_TIMEOUT_CLOSE_CODE,
   RECONNECT_WINDOW_SECONDS,
   RESPAWN_MS,
+  USERNAME_TAKEN,
   SPAWN_PROTECTION_MS,
   TICK_DT,
   TICK_MS,
@@ -20,7 +22,10 @@ import {
   isAttackMessage,
   isCastSkillMessage,
   isHeroId,
+  isUserKey,
   isValidMoveInput,
+  normalizeUsername,
+  sameUsername,
   shapeHits,
   stepMovement,
   type CastSkillMessage,
@@ -55,6 +60,8 @@ import {
   type ZoneVisibility,
 } from "./skills/SkillSystem.js";
 import { MatchController, type MatchTransition } from "./match/MatchController.js";
+import { recordMatch, services } from "./db/services.js";
+import { clientIp } from "./http/json.js";
 
 const LOOP_INTERVAL_MS = 4;
 const MAX_CATCH_UP_MS = 250;
@@ -66,9 +73,15 @@ const PICK_TIMEOUT_TICKS = Math.round(PICK_HERO_TIMEOUT_MS / TICK_MS);
 
 export const ROOM_FULL = "Room is full";
 export const ROOM_EMPTY = "Room has no players";
+export const USERNAME_REQUIRED = "Username is required";
+
+interface PlayerAuth {
+  username: string;
+}
 
 interface ServerPlayer {
   id: string;
+  name: string;
   slot: 0 | 1;
   heroId: HeroId | null;
   connected: boolean;
@@ -91,6 +104,11 @@ interface ServerPlayer {
 
 type SpawnedPlayer = ServerPlayer & { heroId: HeroId };
 
+interface MatchLineup {
+  startedAt: Date;
+  players: { id: string; slot: 0 | 1; name: string; heroId: HeroId }[];
+}
+
 export class DuelRoom extends Room {
   maxClients = MAX_PLAYERS + MAX_SPECTATORS;
 
@@ -102,6 +120,7 @@ export class DuelRoom extends Room {
   private readonly skills = new SkillSystem<SpawnedPlayer>();
   private readonly match = new MatchController();
   private events: CombatEvent[] = [];
+  private lineup: MatchLineup | null = null;
   private tick = 0;
   private lastLoopAt = performance.now();
   private accumulatorMs = 0;
@@ -118,8 +137,22 @@ export class DuelRoom extends Room {
     this.syncMetadata();
   }
 
-  onJoin(client: Client, options?: JoinOptions) {
-    if (options?.spectate === true || this.players.size >= MAX_PLAYERS) {
+  onAuth(_client: Client, options: JoinOptions | undefined, context: AuthContext): PlayerAuth {
+    const username = normalizeUsername(options?.name);
+    if (this.joinsAsSpectator(options)) return { username: username ?? "spectator" };
+    if (!username) throw new Error(USERNAME_REQUIRED);
+
+    const users = services()?.users;
+    if (!users) return { username };
+    if (!isUserKey(options?.userKey)) throw new Error(USERNAME_TAKEN);
+    const socketIp = Array.isArray(context.ip) ? context.ip[0] : context.ip;
+    const result = users.authenticate(username, options.userKey, clientIp(context.headers, socketIp));
+    if (!result.ok) throw new Error(USERNAME_TAKEN);
+    return { username: result.username };
+  }
+
+  onJoin(client: Client<unknown, PlayerAuth>, options?: JoinOptions) {
+    if (this.joinsAsSpectator(options)) {
       if (this.players.size === 0) throw new Error(ROOM_EMPTY);
       if (this.spectators.size >= MAX_SPECTATORS) throw new Error(ROOM_FULL);
       this.spectators.add(client.sessionId);
@@ -127,9 +160,13 @@ export class DuelRoom extends Room {
       return;
     }
 
+    const name = client.auth?.username ?? "player";
+    if ([...this.players.values()].some((player) => sameUsername(player.name, name))) throw new Error(ALREADY_IN_ROOM);
+
     const slot = this.freeSlot();
     this.players.set(client.sessionId, {
       id: client.sessionId,
+      name,
       slot,
       heroId: null,
       connected: true,
@@ -150,6 +187,10 @@ export class DuelRoom extends Room {
       joinedAtTick: this.tick,
     });
     this.syncMetadata();
+  }
+
+  private joinsAsSpectator(options: JoinOptions | undefined): boolean {
+    return options?.spectate === true || this.players.size >= MAX_PLAYERS;
   }
 
   async onLeave(client: Client, consented?: boolean) {
@@ -335,15 +376,45 @@ export class DuelRoom extends Room {
 
   private applyTransition(transition: MatchTransition | null, spawned: SpawnedPlayer[]) {
     if (!transition) return;
-    if (transition === "countdown") this.resetForMatch(spawned);
-    if (transition === "playing") for (const player of spawned) this.protect(player);
+    if (transition === "countdown") {
+      this.lineup = null;
+      this.resetForMatch(spawned);
+    }
+    if (transition === "playing") {
+      this.lineup = {
+        startedAt: new Date(),
+        players: spawned.map(({ id, slot, name, heroId }) => ({ id, slot, name, heroId })),
+      };
+      for (const player of spawned) this.protect(player);
+    }
     if (transition === "ended") {
       for (const player of spawned) {
         player.pendingCast = null;
         player.attackLatched = false;
       }
+      this.saveFinishedMatch();
     }
     this.events.push({ kind: "matchPhase", phase: this.match.phase });
+  }
+
+  private saveFinishedMatch() {
+    const lineup = this.lineup;
+    this.lineup = null;
+    if (!lineup || !this.match.endReason) return;
+    const scores = this.match.view(this.tick, []).scores;
+    recordMatch({
+      roomCode: this.roomId,
+      startedAt: lineup.startedAt,
+      endedAt: new Date(),
+      endReason: this.match.endReason,
+      players: lineup.players.map((player) => ({
+        slot: player.slot,
+        username: player.name,
+        heroId: player.heroId,
+        kills: scores.find((score) => score.id === player.id)?.kills ?? 0,
+        won: this.match.winnerId === player.id,
+      })),
+    });
   }
 
   private resetForMatch(spawned: SpawnedPlayer[]) {
@@ -544,7 +615,7 @@ export class DuelRoom extends Room {
     return {
       tick: this.tick,
       playersInRoom: this.players.size,
-      roster: spawned.map((player) => ({ id: player.id, heroId: player.heroId })),
+      roster: spawned.map((player) => ({ id: player.id, heroId: player.heroId, name: player.name })),
       visible: visible.map((player) => this.visiblePlayer(player, viewerId)),
       match: this.match.view(
         this.tick,

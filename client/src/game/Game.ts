@@ -228,7 +228,7 @@ export class Game {
       this.heroIds.set(entry.id, entry.heroId);
       if (this.views.has(entry.id)) continue;
       const isAllySide = this.spectating ? this.seatIds.indexOf(entry.id) === 0 : entry.id === this.connection.sessionId;
-      const view = this.heroRenderer.create(getHero(entry.heroId), isAllySide);
+      const view = this.heroRenderer.create(getHero(entry.heroId), isAllySide, entry.name);
       view.setVisible(false);
       this.views.set(entry.id, view);
       this.scene.add(view.root);

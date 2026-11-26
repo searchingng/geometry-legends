@@ -21,3 +21,36 @@ export function radialGradientTexture(): Texture {
   radialGradient.colorSpace = SRGBColorSpace;
   return radialGradient;
 }
+
+const LABEL_FONT_PX = 40;
+const LABEL_PADDING_PX = 8;
+const LABEL_FONT = `600 ${LABEL_FONT_PX}px ui-monospace, "Cascadia Code", Consolas, monospace`;
+
+export interface LabelTexture {
+  texture: Texture;
+  aspect: number;
+}
+
+export function labelTexture(text: string, color: string): LabelTexture {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d")!;
+  context.font = LABEL_FONT;
+  const width = Math.ceil(context.measureText(text).width) + LABEL_PADDING_PX * 2;
+  const height = LABEL_FONT_PX + LABEL_PADDING_PX * 2;
+  canvas.width = width;
+  canvas.height = height;
+
+  context.font = LABEL_FONT;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.lineJoin = "round";
+  context.lineWidth = 8;
+  context.strokeStyle = "rgba(5, 7, 13, 0.9)";
+  context.strokeText(text, width / 2, height / 2);
+  context.fillStyle = color;
+  context.fillText(text, width / 2, height / 2);
+
+  const texture = new CanvasTexture(canvas);
+  texture.colorSpace = SRGBColorSpace;
+  return { texture, aspect: width / height };
+}

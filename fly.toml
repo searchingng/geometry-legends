@@ -7,6 +7,11 @@ primary_region = "iad"
 [env]
   NODE_ENV = "production"
   PORT = "8080"
+  CLIENT_IP_HEADER = "fly-client-ip"
+
+[mounts]
+  source = "moba_data"
+  destination = "/data"
 
 [http_service]
   internal_port = 8080
