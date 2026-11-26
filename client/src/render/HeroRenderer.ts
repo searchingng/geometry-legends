@@ -6,6 +6,7 @@ export interface HeroView {
   update(position: Vec2, frameMs: number): void;
   setVisible(visible: boolean): void;
   setConcealed(concealed: boolean): void;
+  setProtected(isProtected: boolean): void;
   setHealth(fraction: number): void;
   flash(): void;
   destroy(): void;

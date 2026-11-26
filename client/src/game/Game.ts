@@ -8,6 +8,7 @@ import {
   getSkill,
   type CombatEvent,
   type HeroId,
+  type MatchPhase,
   type PickHeroMessage,
   type SkillSlot,
   type SnapshotMessage,
@@ -31,11 +32,16 @@ import { SnapshotBuffer } from "./SnapshotBuffer.js";
 import type { Hud } from "../ui/Hud.js";
 import { CombatFeedback } from "../ui/CombatFeedback.js";
 import { Minimap } from "../ui/Minimap.js";
+import { MatchHud } from "../ui/MatchHud.js";
+import { SpectatorHud } from "../ui/SpectatorHud.js";
+import { SpectatorCamera } from "./SpectatorCamera.js";
 
 const MAX_TICKS_PER_FRAME = 5;
 const PING_INTERVAL_MS = 1000;
 const HUD_UPDATE_MS = 250;
 const MIN_BOLT_RANGE = 150;
+const IDLE_DIRECTION = { x: 0, y: 0 };
+const SEAT_COLORS = ["#5dffa0", "#ff5a5a"];
 
 export class Game {
   private readonly views = new Map<string, HeroView>();
@@ -54,6 +60,13 @@ export class Game {
   private readonly attackTargeting: AttackTargeting;
   private readonly skillCasting: SkillCasting;
   private readonly combatFeedback: CombatFeedback;
+  private readonly matchHud: MatchHud;
+  private matchPhase: MatchPhase | undefined;
+  private spectating = false;
+  private spectatorHud: SpectatorHud | undefined;
+  private readonly spectatorCamera: SpectatorCamera;
+  private seatIds: string[] = [];
+  private resyncPending = false;
   private predictor: LocalPredictor | undefined;
   private myHeroId: HeroId | undefined;
   private me: VisiblePlayer | undefined;
@@ -82,6 +95,14 @@ export class Game {
     this.attackTargeting = new AttackTargeting(this.services);
     this.skillCasting = new SkillCasting(this.services);
     this.combatFeedback = new CombatFeedback(this.services);
+    this.matchHud = new MatchHud(
+      () => connection.send(Message.Rematch, {}),
+      () => void this.backToMenu(),
+    );
+    this.spectatorCamera = new SpectatorCamera(scene, keyboard, ARENA);
+    connection.onStatus((status) => {
+      if (status === "connected") this.resyncPending = true;
+    });
 
     this.arena = createArenaView(ARENA, this.visionFog);
     scene.add(this.arena.root);
@@ -98,8 +119,13 @@ export class Game {
   }
 
   private predictLocalCast(slot: SkillSlot, aim: Vec2) {
-    if (!this.predictor || !this.myHeroId || this.dead) return;
+    if (!this.predictor || !this.myHeroId || this.inputLocked) return;
     this.predictor.predictCast(getSkill(getHero(this.myHeroId).skills[slot]), aim);
+  }
+
+  private async backToMenu() {
+    await this.connection.leave();
+    location.assign(location.pathname);
   }
 
   pickHero(heroId: HeroId) {
@@ -108,6 +134,8 @@ export class Game {
   }
 
   private onSnapshot(snapshot: SnapshotMessage) {
+    if (snapshot.spectating && !this.spectating) this.enterSpectatorMode();
+    this.seatIds = snapshot.roster.map((entry) => entry.id);
     this.snapshots.push(snapshot, performance.now());
     this.syncViews(snapshot);
 
@@ -121,6 +149,22 @@ export class Game {
     };
     this.skillEffects.onSnapshot(snapshotContext);
     this.combatFeedback.onSnapshot(snapshotContext);
+    this.matchHud.update(snapshot.match, {
+      myId: this.connection.sessionId,
+      spectating: this.spectating,
+      playersInRoom: snapshot.playersInRoom,
+      heroName: (id) => {
+        const heroId = this.heroIds.get(id);
+        return heroId ? getHero(heroId).name : "";
+      },
+    });
+    const previousPhase = this.matchPhase;
+    this.matchPhase = snapshot.match?.phase;
+    const matchRestarted = this.matchPhase === "countdown" && previousPhase !== "countdown";
+    if (this.spectating) {
+      this.updateSpectatorHud(snapshot);
+      return;
+    }
 
     const me = snapshot.visible.find((player) => player.id === this.connection.sessionId);
     const myEntry = snapshot.roster.find((entry) => entry.id === this.connection.sessionId);
@@ -140,6 +184,10 @@ export class Game {
       this.dead = false;
       this.predictor.teleport(position);
       this.visionFog.setRadius(getHero(myEntry.heroId).visionRange);
+    } else if (matchRestarted || this.resyncPending) {
+      this.resyncPending = false;
+      this.accumulatorMs = 0;
+      this.predictor.teleport(position);
     } else {
       this.predictor.reconcile(position, me.lastInputSeq, me.statuses);
     }
@@ -148,7 +196,9 @@ export class Game {
   private syncHealth(visible: VisiblePlayer[]) {
     for (const player of visible) {
       const heroId = this.heroIds.get(player.id);
-      if (heroId) this.views.get(player.id)?.setHealth(player.hp / getHero(heroId).maxHp);
+      const view = this.views.get(player.id);
+      if (heroId) view?.setHealth(player.hp / getHero(heroId).maxHp);
+      view?.setProtected((player.statuses?.protectedTicks ?? 0) > 0);
     }
   }
 
@@ -177,7 +227,8 @@ export class Game {
     for (const entry of snapshot.roster) {
       this.heroIds.set(entry.id, entry.heroId);
       if (this.views.has(entry.id)) continue;
-      const view = this.heroRenderer.create(getHero(entry.heroId), entry.id === this.connection.sessionId);
+      const isAllySide = this.spectating ? this.seatIds.indexOf(entry.id) === 0 : entry.id === this.connection.sessionId;
+      const view = this.heroRenderer.create(getHero(entry.heroId), isAllySide);
       view.setVisible(false);
       this.views.set(entry.id, view);
       this.scene.add(view.root);
@@ -219,12 +270,18 @@ export class Game {
       myPosition,
       me: this.me,
       dead: this.dead,
+      spectating: this.spectating,
+      inputLocked: this.inputLocked || this.spectating,
       enemies,
       viewPosition: this.viewPosition,
     };
-    this.updateConcealment(ctx);
-    this.attackTargeting.frame(ctx);
-    this.skillCasting.frame(ctx);
+    if (this.spectating) {
+      this.updateSpectatorView(ctx);
+    } else {
+      this.updateConcealment(ctx);
+      this.attackTargeting.frame(ctx);
+      this.skillCasting.frame(ctx);
+    }
     this.combatFeedback.frame(ctx);
 
     this.effects.update(frameMs, this.viewPosition);
@@ -251,14 +308,70 @@ export class Game {
     });
   }
 
+  private enterSpectatorMode() {
+    this.spectating = true;
+    this.visionFog.disable();
+    this.arena.bushes.setSeeThrough(true);
+    this.spectatorCamera.activate();
+    this.spectatorHud = new SpectatorHud();
+  }
+
+  private updateSpectatorView(ctx: FrameContext) {
+    const positions = new Map(ctx.enemies.map((player) => [player.id, player.position]));
+    this.spectatorCamera.update(ctx.frameMs, this.seatIds.map((id) => positions.get(id)));
+
+    for (const player of ctx.enemies) {
+      this.views.get(player.id)?.setConcealed(bushIndexAt(ARENA, player.position) !== -1);
+    }
+    this.minimap.update({
+      now: ctx.now,
+      myPosition: undefined,
+      hiddenInBush: false,
+      enemies: ctx.enemies.map((player) => ({
+        position: player.position,
+        color: this.seatColor(player.id),
+        hiddenInBush: bushIndexAt(ARENA, player.position) !== -1,
+      })),
+      visibleArea: undefined,
+      fullView: true,
+    });
+  }
+
+  private updateSpectatorHud(snapshot: SnapshotMessage) {
+    const players = this.seatIds.map((id) => {
+      const heroId = this.heroIds.get(id);
+      const player = snapshot.visible.find((visible) => visible.id === id);
+      if (!heroId) return undefined;
+      const hero = getHero(heroId);
+      return { name: hero.name, color: this.seatColor(id), hp: player?.hp ?? 0, maxHp: hero.maxHp, down: !player };
+    });
+    this.spectatorHud?.update({
+      spectators: snapshot.spectators ?? 1,
+      players: [players[0], players[1]],
+      followed: this.spectatorCamera.followedIndex,
+    });
+  }
+
+  private seatColor(id: string): string {
+    return SEAT_COLORS[this.seatIds.indexOf(id)] ?? SEAT_COLORS[1];
+  }
+
   private localPosition(tickAlpha: number, frameMs: number): Vec2 | undefined {
     return this.dead ? undefined : this.predictor?.renderPosition(tickAlpha, frameMs);
+  }
+
+  private get gameplayFrozen(): boolean {
+    return this.matchPhase === "countdown" || this.matchPhase === "ended";
+  }
+
+  private get inputLocked(): boolean {
+    return this.dead || this.gameplayFrozen || this.connection.connectionStatus !== "connected";
   }
 
   private stepSimulation(frameMs: number) {
     if (!this.predictor) return;
 
-    if (this.dead) {
+    if (this.dead || this.connection.connectionStatus !== "connected") {
       this.accumulatorMs = 0;
       return;
     }
@@ -266,7 +379,7 @@ export class Game {
     this.accumulatorMs += frameMs;
     let ticks = 0;
     while (this.accumulatorMs >= TICK_MS && ticks < MAX_TICKS_PER_FRAME) {
-      const input = this.predictor.predict(this.keyboard.moveDirection());
+      const input = this.predictor.predict(this.gameplayFrozen ? IDLE_DIRECTION : this.keyboard.moveDirection());
       this.connection.send(Message.Input, input);
       this.accumulatorMs -= TICK_MS;
       ticks++;
@@ -290,12 +403,21 @@ export class Game {
   }
 
   private statusText(): string {
+    if (this.spectating) {
+      const latest = this.snapshots.latest();
+      if (!latest || latest.playersInRoom < 2) return "Spectating — waiting for a second player…";
+      if (latest.roster.length < latest.playersInRoom) return "Spectating — players are choosing heroes…";
+      return "Spectating the match.";
+    }
     if (!this.myHeroId) return "Choose your hero.";
 
     const you = `You are ${getHero(this.myHeroId).name}.`;
     const latest = this.snapshots.latest();
     if (!latest || latest.playersInRoom < 2) return `${you} Waiting for opponent… share the room code or link.`;
     if (latest.roster.length < 2) return `${you} Opponent is choosing a hero…`;
+    if (this.connection.connectionStatus !== "connected") return `${you} Connection lost — reconnecting…`;
+    if (this.matchPhase === "countdown") return `${you} Get ready…`;
+    if (this.matchPhase === "ended") return `${you} Match over.`;
     return `${you} WASD move · Space/J attack · hold Q/E/R + left click to cast.`;
   }
 }

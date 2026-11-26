@@ -22,8 +22,15 @@ export interface MinimapFrame {
   now: number;
   myPosition: Vec2 | undefined;
   hiddenInBush: boolean;
-  enemies: readonly { position: Vec2 }[];
+  enemies: readonly MinimapMarker[];
   visibleArea: VisibleArea | undefined;
+  fullView?: boolean;
+}
+
+export interface MinimapMarker {
+  position: Vec2;
+  color?: string;
+  hiddenInBush?: boolean;
 }
 
 export class Minimap {
@@ -36,6 +43,7 @@ export class Minimap {
 
   constructor(private readonly map: GameMap) {
     this.canvas.id = "minimap";
+    this.canvas.hidden = true;
     this.context = this.canvas.getContext("2d")!;
     document.body.append(this.canvas);
     this.resize();
@@ -43,6 +51,10 @@ export class Minimap {
   }
 
   update(frame: MinimapFrame) {
+    if (this.canvas.hidden) {
+      if (!frame.myPosition && frame.enemies.length === 0) return;
+      this.canvas.hidden = false;
+    }
     if (frame.now - this.lastDrawAt < REDRAW_INTERVAL_MS) return;
     this.lastDrawAt = frame.now;
     this.draw(frame);
@@ -77,14 +89,18 @@ export class Minimap {
     const context = this.context;
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    context.globalAlpha = MAP_DIM_ALPHA;
+    context.globalAlpha = frame.fullView ? 1 : MAP_DIM_ALPHA;
     context.drawImage(this.background, 0, 0);
     context.globalAlpha = 1;
 
     if (frame.visibleArea) this.drawVisibleArea(frame.visibleArea);
 
     context.setTransform(this.scale, 0, 0, this.scale, 0, 0);
-    for (const enemy of frame.enemies) this.drawDot(enemy.position, COLORS.enemy);
+    for (const enemy of frame.enemies) {
+      const color = enemy.color ?? COLORS.enemy;
+      this.drawDot(enemy.position, color);
+      if (enemy.hiddenInBush) this.drawRing(enemy.position, color);
+    }
     if (frame.myPosition) {
       this.drawDot(frame.myPosition, COLORS.me);
       if (frame.hiddenInBush) this.drawRing(frame.myPosition, COLORS.me);

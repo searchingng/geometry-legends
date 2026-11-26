@@ -22,12 +22,14 @@ const TUFT_MAX_RADIUS = 14;
 const TUFT_SEGMENTS = 5;
 const PATCH_INSET = 2;
 const OCCUPIED_OPACITY = 0.4;
+const SEE_THROUGH_OPACITY = 0.3;
 const TUFT_COLORS = [0x2f8a4a, 0x3aa055, 0x277a43, 0x46b062].map((hex) => new Color(hex));
 const PATCH_COLOR = 0x173d2a;
 
 export class BushView {
   readonly root = new Group();
   private readonly activeBush = { value: -1 };
+  private readonly seeThrough = { value: 0 };
 
   constructor(bushes: readonly Rect[], visionFog: VisionFog) {
     if (bushes.length === 0) return;
@@ -45,18 +47,23 @@ export class BushView {
     this.activeBush.value = index;
   }
 
+  setSeeThrough(enabled: boolean) {
+    this.seeThrough.value = enabled ? 1 : 0;
+  }
+
   private createTuftMaterial(): MeshLambertMaterial {
     const material = new MeshLambertMaterial({ vertexColors: true, flatShading: true, transparent: true });
     material.onBeforeCompile = (shader) => {
       shader.uniforms.uActiveBush = this.activeBush;
+      shader.uniforms.uSeeThrough = this.seeThrough;
       shader.vertexShader = shader.vertexShader
         .replace(
           "#include <common>",
-          "#include <common>\nattribute float bushIndex;\nuniform float uActiveBush;\nvarying float vBushAlpha;",
+          "#include <common>\nattribute float bushIndex;\nuniform float uActiveBush;\nuniform float uSeeThrough;\nvarying float vBushAlpha;",
         )
         .replace(
           "#include <begin_vertex>",
-          `#include <begin_vertex>\nvBushAlpha = abs(bushIndex - uActiveBush) < 0.5 ? ${OCCUPIED_OPACITY.toFixed(2)} : 1.0;`,
+          `#include <begin_vertex>\nvBushAlpha = uSeeThrough > 0.5 ? ${SEE_THROUGH_OPACITY.toFixed(2)} : abs(bushIndex - uActiveBush) < 0.5 ? ${OCCUPIED_OPACITY.toFixed(2)} : 1.0;`,
         );
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", "#include <common>\nvarying float vBushAlpha;")

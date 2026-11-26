@@ -92,6 +92,16 @@ export class VisionFog {
     if (Number.isFinite(this.center.x)) this.recast();
   }
 
+  disable() {
+    this.radius = UNLIMITED_RADIUS;
+    this.center.x = Number.NaN;
+    this.center.y = Number.NaN;
+    this.uniforms.uVisionRadius.value = UNLIMITED_RADIUS;
+    this.uniforms.uRayScale.value = UNLIMITED_RADIUS;
+    this.rayBytes.fill(255);
+    this.rayTexture.needsUpdate = true;
+  }
+
   visibleArea(): VisibleArea | undefined {
     if (!Number.isFinite(this.center.x) || this.radius <= 0 || this.radius >= UNLIMITED_RADIUS) return undefined;
     return { center: this.center, rays: this.rays };

@@ -16,3 +16,9 @@ export const MATCH_DURATION_MS = 10 * 60 * 1000;
 export const MATCH_COUNTDOWN_MS = 3000;
 export const SPAWN_PROTECTION_MS = 2000;
 export const RECONNECT_WINDOW_SECONDS = 20;
+export const PICK_HERO_TIMEOUT_MS = 60_000;
+export const PICK_TIMEOUT_CLOSE_CODE = 4010;
+
+export const MAX_PLAYERS = 2;
+export const MAX_SPECTATORS = 8;
+export const ROOMS_API_PATH = "/api/rooms";

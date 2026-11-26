@@ -195,4 +195,25 @@ export interface SnapshotMessage {
   projectiles?: VisibleProjectile[];
   zones?: VisibleZone[];
   match?: MatchState;
+  spectating?: true;
+  spectators?: number;
+}
+
+export type ViewerRole = "player" | "spectator";
+
+export interface JoinOptions {
+  spectate?: boolean;
+}
+
+export interface RoomSummary {
+  code: string;
+  players: number;
+  maxPlayers: number;
+  spectators: number;
+  phase: MatchPhase;
+  heroes: HeroId[];
+}
+
+export interface RoomListResponse {
+  rooms: RoomSummary[];
 }

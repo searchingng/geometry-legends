@@ -5,6 +5,7 @@ import { WebSocketTransport } from "@colyseus/ws-transport";
 import { DEFAULT_SERVER_PORT, ROOM_NAME } from "@moba/shared";
 import { DuelRoom } from "./DuelRoom.js";
 import { staticFileHandler } from "./staticFiles.js";
+import { handleRoomList, isRoomListRequest } from "./roomList.js";
 
 const production = process.env.NODE_ENV === "production";
 const port = Number(
@@ -16,6 +17,10 @@ const serveClient = staticFileHandler(clientDist);
 const httpServer = createServer((req, res) => {
   if (req.url === "/healthz") {
     res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }).end("ok");
+    return;
+  }
+  if (isRoomListRequest(req)) {
+    void handleRoomList(req, res);
     return;
   }
   if (serveClient) {

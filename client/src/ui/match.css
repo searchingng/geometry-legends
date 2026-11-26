@@ -1,0 +1,191 @@
+.match-scoreboard {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 14px;
+  border: 1px solid rgba(120, 140, 200, 0.35);
+  border-radius: 10px;
+  background: rgba(4, 6, 12, 0.78);
+  font: 700 15px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #dfe6ff;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.match-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.match-name {
+  font-size: 12px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.match-score {
+  min-width: 22px;
+  font-size: 22px;
+  text-align: center;
+}
+
+.match-score-me {
+  color: #5dffa0;
+}
+
+.match-score-enemy {
+  color: #ff5a5a;
+}
+
+.match-timer {
+  min-width: 56px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 14px;
+  text-align: center;
+}
+
+.match-countdown {
+  position: fixed;
+  top: 32%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 7;
+  font: 800 96px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #ffe14d;
+  text-shadow:
+    0 0 18px rgba(255, 200, 60, 0.6),
+    0 4px 4px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.match-banner {
+  position: fixed;
+  top: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(60, 40, 8, 0.85);
+  border: 1px solid rgba(255, 190, 80, 0.6);
+  font: 600 13px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #ffd27a;
+  pointer-events: none;
+}
+
+.match-end {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 4, 10, 0.62);
+}
+
+.match-end[hidden],
+.match-scoreboard[hidden],
+.match-countdown[hidden],
+.match-banner[hidden],
+.match-rematch[hidden] {
+  display: none;
+}
+
+.match-end-card {
+  min-width: 280px;
+  max-width: calc(100vw - 32px);
+  padding: 24px 28px;
+  border-radius: 14px;
+  border: 1px solid rgba(140, 160, 230, 0.4);
+  background: #0a0e1c;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #dfe6ff;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+
+.match-end-title {
+  margin: 0 0 6px;
+  font-size: 40px;
+  letter-spacing: 0.06em;
+}
+
+.match-end[data-outcome="victory"] .match-end-title {
+  color: #5dffa0;
+}
+
+.match-end[data-outcome="defeat"] .match-end-title {
+  color: #ff5a5a;
+}
+
+.match-end[data-outcome="draw"] .match-end-title {
+  color: #ffe14d;
+}
+
+.match-end-reason {
+  margin: 0 0 14px;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
+.match-end-scores {
+  margin-bottom: 18px;
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.match-rematch {
+  padding: 10px 26px;
+  border: none;
+  border-radius: 8px;
+  background: #3d7cff;
+  color: #fff;
+  font: 700 15px ui-monospace, "Cascadia Code", Consolas, monospace;
+  cursor: pointer;
+}
+
+.match-end-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.match-menu {
+  padding: 10px 22px;
+  border: 1px solid rgba(140, 160, 230, 0.5);
+  border-radius: 8px;
+  background: transparent;
+  color: #dfe6ff;
+  font: 700 15px ui-monospace, "Cascadia Code", Consolas, monospace;
+  cursor: pointer;
+}
+
+.match-menu:hover:not(:disabled) {
+  background: rgba(140, 160, 230, 0.15);
+}
+
+.match-menu:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.match-rematch:disabled {
+  background: #2a3555;
+  cursor: default;
+}
+
+.match-end-note {
+  min-height: 1em;
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #ffd27a;
+}

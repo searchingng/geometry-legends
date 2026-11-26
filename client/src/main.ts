@@ -11,6 +11,7 @@ import { HeroPicker } from "./ui/HeroPicker.js";
 import { ReconnectOverlay } from "./ui/ReconnectOverlay.js";
 
 const ROOM_PARAM = "room";
+const SPECTATE_PARAM = "spectate";
 
 async function start() {
   const hud = new Hud();
@@ -21,6 +22,7 @@ async function start() {
   const connection = await lobby.connect(url.searchParams.get(ROOM_PARAM));
 
   url.searchParams.set(ROOM_PARAM, connection.roomCode);
+  url.searchParams.delete(SPECTATE_PARAM);
   history.replaceState(null, "", url);
 
   const shareUrl = new URL(location.origin + location.pathname);
@@ -29,17 +31,24 @@ async function start() {
 
   new ReconnectOverlay(connection);
   const game = new Game(scene, connection, new Keyboard(), new Pointer(scene), new MeshHeroRenderer(), hud);
-  if (connection.resumed && (await alreadyPicked(connection))) return;
+  const first = await firstSnapshot(connection);
+  if (first.spectating) {
+    connection.markSpectator();
+    url.searchParams.set(SPECTATE_PARAM, "1");
+    history.replaceState(null, "", url);
+    return;
+  }
+  if (connection.resumed && first.roster.some((entry) => entry.id === connection.sessionId)) return;
   game.pickHero(await new HeroPicker().pick());
 }
 
-function alreadyPicked(connection: Connection): Promise<boolean> {
+function firstSnapshot(connection: Connection): Promise<SnapshotMessage> {
   return new Promise((resolve) => {
     let settled = false;
     connection.on<SnapshotMessage>(Message.Snapshot, (snapshot) => {
       if (settled) return;
       settled = true;
-      resolve(snapshot.roster.some((entry) => entry.id === connection.sessionId));
+      resolve(snapshot);
     });
   });
 }

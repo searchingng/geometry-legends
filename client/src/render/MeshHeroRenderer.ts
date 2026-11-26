@@ -1,4 +1,5 @@
 import {
+  CylinderGeometry,
   AdditiveBlending,
   type Blending,
   type BufferGeometry,
@@ -43,6 +44,8 @@ const BASE_EMISSIVE = 0.4;
 const FLASH_EMISSIVE = 2.2;
 const FLASH_MS = 140;
 const CONCEALED_OPACITY = 0.45;
+const PROTECTION_COLOR = 0xffd34d;
+const PROTECTION_PULSE_SPEED = 0.012;
 
 export class MeshHeroRenderer implements HeroRenderer {
   create(hero: HeroDefinition, isLocal: boolean): HeroView {
@@ -59,6 +62,7 @@ class MeshHeroView implements HeroView {
   private readonly edgeMaterial: LineBasicMaterial;
   private readonly hpFill: Sprite;
   private concealed = false;
+  private readonly protection: Mesh<CylinderGeometry, MeshBasicMaterial>;
   private healthFraction = 1;
   private flashRemainingMs = 0;
   private readonly radius: number;
@@ -110,6 +114,25 @@ class MeshHeroView implements HeroView {
     this.hpFill.position.set(-HP_BAR_WIDTH / 2, barY, 0);
     this.hpFill.renderOrder = hpBackground.renderOrder + 1;
     this.root.add(hpBackground, this.hpFill);
+
+    this.protection = new Mesh(
+      new CylinderGeometry(this.radius * 1.5, this.radius * 1.5, this.bodyHeight + 18, 24, 1, true),
+      new MeshBasicMaterial({
+        color: PROTECTION_COLOR,
+        transparent: true,
+        opacity: 0.3,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        side: DoubleSide,
+      }),
+    );
+    this.protection.position.y = (this.bodyHeight + 18) / 2;
+    this.protection.visible = false;
+    this.root.add(this.protection);
+  }
+
+  setProtected(isProtected: boolean) {
+    this.protection.visible = isProtected;
   }
 
   setHealth(fraction: number) {
@@ -135,6 +158,11 @@ class MeshHeroView implements HeroView {
 
     this.arrow.position.x = this.radius + 14 + this.moveBlend * 8;
     this.arrow.material.opacity = 0.3 + 0.7 * this.moveBlend;
+
+    if (this.protection.visible) {
+      this.protection.material.opacity = 0.18 + 0.14 * Math.sin(this.elapsedMs * PROTECTION_PULSE_SPEED) ** 2;
+      this.protection.rotation.y += frameMs * 0.002;
+    }
 
     if (this.flashRemainingMs > 0) {
       this.flashRemainingMs = Math.max(0, this.flashRemainingMs - frameMs);

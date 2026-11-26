@@ -1,3 +1,4 @@
+import { PICK_TIMEOUT_CLOSE_CODE } from "@moba/shared";
 import type { Connection, ConnectionStatus } from "../net/Connection.js";
 import "./reconnect.css";
 
@@ -6,7 +7,7 @@ export class ReconnectOverlay {
   private readonly message = document.createElement("div");
   private readonly button = document.createElement("button");
 
-  constructor(connection: Connection) {
+  constructor(private readonly connection: Connection) {
     this.root.className = "rc-overlay";
     this.root.hidden = true;
     this.message.className = "rc-message";
@@ -24,7 +25,13 @@ export class ReconnectOverlay {
   private render(status: ConnectionStatus) {
     this.root.hidden = status === "connected";
     this.root.classList.toggle("rc-lost", status === "lost");
-    this.message.textContent = status === "lost" ? "Disconnected" : "Reconnecting…";
+    this.message.textContent = status === "lost" ? this.lostText() : "Reconnecting…";
     this.button.hidden = status !== "lost";
+  }
+
+  private lostText(): string {
+    return this.connection.closeCode === PICK_TIMEOUT_CLOSE_CODE
+      ? "Removed from the room: no hero was picked in time"
+      : "Disconnected";
   }
 }
