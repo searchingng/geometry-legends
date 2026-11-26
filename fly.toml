@@ -1,7 +1,8 @@
-# fly.toml app configuration file generated for geometry-legends on 2026-11-26T09:34:04Z
+# fly.toml app configuration file generated for geometry-legends on 2026-11-26T13:52:01Z
 #
 # See https://docs.fly.io/reference/configuration for information about how to use this file.
 #
+
 app = 'geometry-legends'
 primary_region = 'iad'
 
@@ -9,14 +10,14 @@ primary_region = 'iad'
   dockerfile = 'Dockerfile'
 
 [env]
-  NODE_ENV = "production"
-  PORT = "8080"
-  CLIENT_IP_HEADER = "fly-client-ip"
+  CLIENT_IP_HEADER = 'fly-client-ip'
+  NODE_ENV = 'production'
+  PORT = '8080'
 
-[mounts]
-  source = "moba_data"
-  destination = "/data"
-  initial_size = "1gb"
+[[mounts]]
+  source = 'moba_data'
+  destination = '/data'
+  initial_size = '1gb'
 
 [http_service]
   internal_port = 8080
