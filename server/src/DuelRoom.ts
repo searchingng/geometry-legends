@@ -1,72 +1,158 @@
 import { Room, type Client } from "colyseus";
 import {
   ARENA,
-  HERO_IDS,
   INPUT_BUFFER_TICKS,
   MAX_QUEUED_INPUTS,
   Message,
+  RECONNECT_WINDOW_SECONDS,
+  RESPAWN_MS,
+  SPAWN_PROTECTION_MS,
   TICK_DT,
   TICK_MS,
+  canSeePosition,
+  chooseAttackTarget,
   getHero,
+  getSkill,
+  isAttackMessage,
+  isCastSkillMessage,
+  isHeroId,
   isValidMoveInput,
+  shapeHits,
   stepMovement,
+  type CastSkillMessage,
+  type CombatEvent,
   type HeroId,
   type MoveInput,
+  type SkillShape,
   type SnapshotMessage,
   type Vec2,
-  type WelcomeMessage,
+  type VisiblePlayer,
 } from "@moba/shared";
 import { allocateRoomCode } from "./roomCode.js";
+import { VisionSystem } from "./VisionSystem.js";
+import {
+  canAct,
+  createStatus,
+  isProtected,
+  isStunned,
+  moveSpeedFactor,
+  resetStatus,
+  visibleStatuses,
+  type CombatStatus,
+} from "./skills/CombatStatus.js";
+import {
+  SkillSystem,
+  dealDamage,
+  type DamageResult,
+  type PointVisibility,
+  type SkillWorld,
+  type ZoneVisibility,
+} from "./skills/SkillSystem.js";
+import { MatchController, type MatchTransition } from "./match/MatchController.js";
 
 const LOOP_INTERVAL_MS = 4;
 const MAX_CATCH_UP_MS = 250;
+const RESPAWN_TICKS = Math.round(RESPAWN_MS / TICK_MS);
+const PROTECTION_TICKS = Math.round(SPAWN_PROTECTION_MS / TICK_MS);
+const ATTACKER_REVEAL_TICKS = 30;
 
 interface ServerPlayer {
   id: string;
   slot: 0 | 1;
-  heroId: HeroId;
+  heroId: HeroId | null;
+  connected: boolean;
   position: Vec2;
+  hp: number;
+  respawnAtTick: number | null;
+  nextAttackTick: number;
+  attackHeld: boolean;
+  attackLatched: boolean;
+  attackAim: Vec2 | null;
   inputQueue: MoveInput[];
   awaitingInputBuffer: boolean;
   lastQueuedSeq: number;
   lastProcessedSeq: number;
+  status: CombatStatus;
+  skillReadyTick: [number, number, number];
+  pendingCast: CastSkillMessage | null;
 }
+
+type SpawnedPlayer = ServerPlayer & { heroId: HeroId };
 
 export class DuelRoom extends Room {
   maxClients = 2;
 
   private readonly players = new Map<string, ServerPlayer>();
+  private readonly vision = new VisionSystem();
+  private readonly skills = new SkillSystem<SpawnedPlayer>();
+  private readonly match = new MatchController();
+  private events: CombatEvent[] = [];
   private tick = 0;
   private lastLoopAt = performance.now();
   private accumulatorMs = 0;
 
   onCreate(options: { roomCode?: unknown }) {
     this.roomId = allocateRoomCode(options.roomCode);
+    this.onMessage(Message.PickHero, (client, message: unknown) => this.pickHero(client, message));
     this.onMessage(Message.Input, (client, input: unknown) => this.queueInput(client, input));
+    this.onMessage(Message.Attack, (client, message: unknown) => this.setAttack(client, message));
+    this.onMessage(Message.CastSkill, (client, message: unknown) => this.queueCast(client, message));
+    this.onMessage(Message.Rematch, (client) => this.voteRematch(client));
     this.onMessage(Message.Ping, (client, sentAt: unknown) => client.send(Message.Pong, sentAt));
     this.setSimulationInterval(() => this.loop(), LOOP_INTERVAL_MS);
   }
 
   onJoin(client: Client) {
     const slot = this.freeSlot();
-    const player: ServerPlayer = {
+    this.players.set(client.sessionId, {
       id: client.sessionId,
       slot,
-      heroId: HERO_IDS[slot % HERO_IDS.length],
+      heroId: null,
+      connected: true,
       position: { ...ARENA.spawns[slot] },
+      hp: 0,
+      respawnAtTick: null,
+      nextAttackTick: 0,
+      attackHeld: false,
+      attackLatched: false,
+      attackAim: null,
       inputQueue: [],
       awaitingInputBuffer: true,
       lastQueuedSeq: 0,
       lastProcessedSeq: 0,
-    };
-    this.players.set(client.sessionId, player);
-
-    const welcome: WelcomeMessage = { playerId: player.id, heroId: player.heroId };
-    client.send(Message.Welcome, welcome);
+      status: createStatus(),
+      skillReadyTick: [0, 0, 0],
+      pendingCast: null,
+    });
   }
 
-  onLeave(client: Client) {
-    this.players.delete(client.sessionId);
+  async onLeave(client: Client, consented?: boolean) {
+    const player = this.players.get(client.sessionId);
+    if (!player) return;
+    if (consented) {
+      this.removePlayer(player.id);
+      return;
+    }
+
+    player.connected = false;
+    player.inputQueue = [];
+    player.awaitingInputBuffer = true;
+    player.attackHeld = false;
+    player.attackLatched = false;
+    player.pendingCast = null;
+    try {
+      await this.allowReconnection(client, RECONNECT_WINDOW_SECONDS);
+      player.connected = true;
+    } catch {
+      this.removePlayer(player.id);
+    }
+  }
+
+  private removePlayer(playerId: string) {
+    this.players.delete(playerId);
+    this.vision.clearRevealsInvolving(playerId);
+    this.skills.removeActor(playerId);
+    this.applyTransition(this.match.forfeit(playerId), this.spawnedPlayers());
   }
 
   private freeSlot(): 0 | 1 {
@@ -74,13 +160,45 @@ export class DuelRoom extends Room {
     return taken.has(0) ? 1 : 0;
   }
 
+  private pickHero(client: Client, message: unknown) {
+    const player = this.players.get(client.sessionId);
+    const heroId = (message as { heroId?: unknown } | null)?.heroId;
+    if (!player || player.heroId !== null || !isHeroId(heroId)) return;
+
+    player.heroId = heroId;
+    player.position = { ...ARENA.spawns[player.slot] };
+    player.hp = getHero(heroId).maxHp;
+  }
+
   private queueInput(client: Client, input: unknown) {
     const player = this.players.get(client.sessionId);
-    if (!player || !isValidMoveInput(input) || input.seq <= player.lastQueuedSeq) return;
+    if (!player || player.heroId === null || !isAlive(player)) return;
+    if (!isValidMoveInput(input) || input.seq <= player.lastQueuedSeq) return;
     if (player.inputQueue.length >= MAX_QUEUED_INPUTS) return;
 
     player.lastQueuedSeq = input.seq;
     player.inputQueue.push(input);
+  }
+
+  private setAttack(client: Client, message: unknown) {
+    const player = this.players.get(client.sessionId);
+    if (!player || !isAttackMessage(message)) return;
+
+    player.attackHeld = message.held;
+    player.attackAim = message.aim ?? null;
+    if (message.held) player.attackLatched = true;
+  }
+
+  private queueCast(client: Client, message: unknown) {
+    const player = this.players.get(client.sessionId);
+    if (!player || player.heroId === null || !isCastSkillMessage(message)) return;
+    player.pendingCast = { slot: message.slot, aim: { x: message.aim.x, y: message.aim.y } };
+  }
+
+  private voteRematch(client: Client) {
+    const spawned = this.spawnedPlayers();
+    const transition = this.match.voteRematch(client.sessionId, this.tick, spawned.map((player) => player.id));
+    this.applyTransition(transition, spawned);
   }
 
   private loop() {
@@ -95,16 +213,168 @@ export class DuelRoom extends Room {
   }
 
   private update() {
-    for (const player of this.players.values()) {
-      const hero = getHero(player.heroId);
-      for (const input of this.takeInputs(player)) {
-        player.position = stepMovement(player.position, input, hero, ARENA, TICK_DT);
-        player.lastProcessedSeq = input.seq;
+    const spawned = this.spawnedPlayers();
+    this.applyTransition(this.match.update(this.tick, spawned.map((player) => player.id)), spawned);
+
+    if (this.match.allowsGameplay) {
+      for (const player of spawned) {
+        if (player.respawnAtTick !== null && this.tick >= player.respawnAtTick) this.respawn(player);
       }
     }
 
+    for (const player of spawned) {
+      if (!isAlive(player)) continue;
+      const hero = getHero(player.heroId);
+      for (const input of this.takeInputs(player)) {
+        player.lastProcessedSeq = input.seq;
+        if (!this.match.allowsGameplay || isStunned(player.status, this.tick) || player.status.motion) continue;
+        const stats = { radius: hero.radius, moveSpeed: hero.moveSpeed * moveSpeedFactor(player.status, this.tick) };
+        player.position = stepMovement(player.position, input, stats, ARENA, TICK_DT);
+      }
+    }
+
+    if (this.match.allowsGameplay) {
+      const world = this.skillWorld(spawned);
+      for (const player of spawned) {
+        const cast = player.pendingCast;
+        player.pendingCast = null;
+        if (cast) this.skills.cast(player, cast.slot, cast.aim, world);
+      }
+      this.skills.update(world);
+    }
+
+    for (const player of spawned) {
+      if (!player.attackHeld && !player.attackLatched) continue;
+      player.attackLatched = false;
+      if (this.match.allowsGameplay && isAlive(player) && canAct(player.status, this.tick)) {
+        this.tryAttack(player, spawned);
+      }
+    }
+    if (!this.match.allowsGameplay) for (const player of spawned) player.pendingCast = null;
+
     this.tick++;
-    this.broadcast(Message.Snapshot, this.snapshot());
+    this.vision.prune(this.tick);
+
+    for (const client of this.clients) {
+      client.send(Message.Snapshot, this.snapshotFor(client.sessionId, spawned));
+    }
+    this.events = [];
+  }
+
+  private applyTransition(transition: MatchTransition | null, spawned: SpawnedPlayer[]) {
+    if (!transition) return;
+    if (transition === "countdown") this.resetForMatch(spawned);
+    if (transition === "playing") for (const player of spawned) this.protect(player);
+    if (transition === "ended") {
+      for (const player of spawned) {
+        player.pendingCast = null;
+        player.attackLatched = false;
+      }
+    }
+    this.events.push({ kind: "matchPhase", phase: this.match.phase });
+  }
+
+  private resetForMatch(spawned: SpawnedPlayer[]) {
+    this.skills.reset();
+    for (const player of spawned) {
+      const hero = getHero(player.heroId);
+      player.hp = hero.maxHp;
+      player.position = { ...ARENA.spawns[player.slot] };
+      player.respawnAtTick = null;
+      player.nextAttackTick = 0;
+      player.attackHeld = false;
+      player.attackLatched = false;
+      player.pendingCast = null;
+      player.skillReadyTick = [0, 0, 0];
+      resetStatus(player.status);
+      this.vision.clearRevealsInvolving(player.id);
+    }
+  }
+
+  private protect(player: SpawnedPlayer) {
+    player.status.protectedUntilTick = this.tick + PROTECTION_TICKS;
+    this.events.push({
+      kind: "statusApplied",
+      targetId: player.id,
+      sourceId: player.id,
+      status: "protection",
+      durationTicks: PROTECTION_TICKS,
+    });
+  }
+
+  private tryAttack(attacker: SpawnedPlayer, spawned: SpawnedPlayer[]) {
+    if (this.tick < attacker.nextAttackTick) return;
+
+    const hero = getHero(attacker.heroId);
+    const reach = {
+      position: attacker.position,
+      radius: hero.radius,
+      attackRange: hero.attackRange,
+    };
+    const viewer = { ...attacker, visionRange: hero.visionRange };
+
+    const candidates = spawned
+      .filter((candidate) => candidate.id !== attacker.id && isAlive(candidate))
+      .filter((candidate) => !isProtected(candidate.status, this.tick))
+      .filter((candidate) => this.vision.canSee(viewer, candidate))
+      .map((candidate) => ({
+        id: candidate.id,
+        position: candidate.position,
+        radius: getHero(candidate.heroId).radius,
+        player: candidate,
+      }));
+    const target = chooseAttackTarget(reach, candidates, attacker.attackAim ?? undefined)?.player;
+    if (!target) return;
+
+    attacker.nextAttackTick = this.tick + Math.ceil(hero.attackCooldownMs / TICK_MS);
+    attacker.status.protectedUntilTick = 0;
+    this.events.push({ kind: "hit", attackerId: attacker.id, targetId: target.id, damage: hero.attackDamage });
+    this.damage(target, hero.attackDamage, attacker);
+  }
+
+  private damage(target: SpawnedPlayer, amount: number, source: SpawnedPlayer): DamageResult {
+    if (isProtected(target.status, this.tick)) return { dealt: 0, absorbed: 0 };
+    const result = dealDamage(target, amount, this.tick);
+    this.vision.reveal(source.id, target.id, this.tick, ATTACKER_REVEAL_TICKS);
+    if (target.hp === 0) this.kill(target, source);
+    return result;
+  }
+
+  private skillWorld(spawned: SpawnedPlayer[]): SkillWorld<SpawnedPlayer> {
+    return {
+      tick: this.tick,
+      actors: spawned,
+      isAlive,
+      damage: (target, amount, source) => this.damage(target, amount, source),
+      reveal: (targetId, viewerId, ticks) => this.vision.reveal(targetId, viewerId, this.tick, ticks),
+      emit: (event) => this.events.push(event),
+    };
+  }
+
+  private kill(player: SpawnedPlayer, killer: SpawnedPlayer) {
+    player.respawnAtTick = this.tick + RESPAWN_TICKS;
+    player.inputQueue = [];
+    player.awaitingInputBuffer = true;
+    player.pendingCast = null;
+    resetStatus(player.status);
+    this.skills.cancelDash(player.id);
+    this.vision.clearRevealsInvolving(player.id);
+    this.events.push({ kind: "death", playerId: player.id, killerId: killer.id });
+    this.applyTransition(this.match.recordKill(killer.id), this.spawnedPlayers());
+  }
+
+  private respawn(player: SpawnedPlayer) {
+    player.respawnAtTick = null;
+    player.hp = getHero(player.heroId).maxHp;
+    player.position = { ...ARENA.spawns[player.slot] };
+    player.nextAttackTick = this.tick;
+    resetStatus(player.status);
+    this.events.push({ kind: "respawn", playerId: player.id });
+    this.protect(player);
+  }
+
+  private spawnedPlayers(): SpawnedPlayer[] {
+    return [...this.players.values()].filter((player): player is SpawnedPlayer => player.heroId !== null);
   }
 
   private takeInputs(player: ServerPlayer): MoveInput[] {
@@ -124,16 +394,97 @@ export class DuelRoom extends Room {
     return queue.splice(0, catchingUp ? 2 : 1);
   }
 
-  private snapshot(): SnapshotMessage {
-    return {
+  private snapshotFor(viewerId: string, spawned: SpawnedPlayer[]): SnapshotMessage {
+    const viewer = spawned.find((player) => player.id === viewerId);
+    const sighted = viewer !== undefined && isAlive(viewer) ? viewer : undefined;
+    const canSee = (target: SpawnedPlayer) =>
+      target.id === viewerId ||
+      (sighted !== undefined &&
+        isAlive(target) &&
+        this.vision.canSee({ ...sighted, visionRange: getHero(sighted.heroId).visionRange }, target));
+
+    const visible = spawned.filter(canSee);
+    const visibleIds = new Set(visible.map((player) => player.id));
+
+    const pointVisible = (point: Vec2) =>
+      sighted !== undefined && canSeePosition(ARENA, sighted.position, getHero(sighted.heroId).visionRange, point);
+    const landsOnViewer = (shape: SkillShape, origin: Vec2, direction: Vec2) =>
+      sighted !== undefined && shapeHits(shape, origin, direction, sighted.position, getHero(sighted.heroId).radius);
+    const projectileVisible: PointVisibility = (point, casterId) => casterId === viewerId || pointVisible(point);
+    const zoneVisible: ZoneVisibility = (zone) =>
+      zone.casterId === viewerId ||
+      pointVisible(zone.origin) ||
+      (zone.anchor !== "aimPoint" && visibleIds.has(zone.casterId)) ||
+      landsOnViewer(zone.shape, zone.origin, zone.direction);
+
+    const events = this.events.filter((event) => {
+      switch (event.kind) {
+        case "hit":
+          return visibleIds.has(event.attackerId) || visibleIds.has(event.targetId);
+        case "respawn":
+          return event.playerId === viewerId;
+        case "death":
+        case "matchPhase":
+          return true;
+        case "skillCast":
+          return visibleIds.has(event.casterId);
+        case "skillHit":
+        case "statusApplied":
+          return event.targetId === viewerId || visibleIds.has(event.targetId);
+        case "skillZone": {
+          const zone = getSkill(event.skillId).zones[event.zoneIndex];
+          const shape: SkillShape =
+            event.length !== undefined && zone.shape.type === "line" ? { ...zone.shape, length: event.length } : zone.shape;
+          return zoneVisible({
+            origin: event,
+            direction: { x: event.dirX, y: event.dirY },
+            shape,
+            anchor: zone.anchor,
+            casterId: event.casterId,
+          });
+        }
+        case "projectileEnd":
+          return event.targetId === viewerId || projectileVisible(event, event.casterId);
+      }
+    });
+
+    const snapshot: SnapshotMessage = {
       tick: this.tick,
-      players: [...this.players.values()].map((player) => ({
-        id: player.id,
-        heroId: player.heroId,
-        x: player.position.x,
-        y: player.position.y,
-        lastInputSeq: player.lastProcessedSeq,
-      })),
+      playersInRoom: this.players.size,
+      roster: spawned.map((player) => ({ id: player.id, heroId: player.heroId })),
+      visible: visible.map((player) => this.visiblePlayer(player, viewerId)),
+      match: this.match.view(
+        this.tick,
+        spawned.filter((player) => !player.connected).map((player) => player.id),
+      ),
     };
+    if (events.length > 0) snapshot.events = events;
+    const projectiles = this.skills.visibleProjectiles(projectileVisible);
+    if (projectiles.length > 0) snapshot.projectiles = projectiles;
+    const zones = this.skills.visibleZones(zoneVisible, this.tick);
+    if (zones.length > 0) snapshot.zones = zones;
+    return snapshot;
   }
+
+  private visiblePlayer(player: SpawnedPlayer, viewerId: string): VisiblePlayer {
+    const entry: VisiblePlayer = {
+      id: player.id,
+      x: player.position.x,
+      y: player.position.y,
+      hp: player.hp,
+      lastInputSeq: player.id === viewerId ? player.lastProcessedSeq : 0,
+    };
+    if (player.respawnAtTick !== null) entry.respawnTicks = player.respawnAtTick - this.tick;
+    if (player.id === viewerId) {
+      const [q, e, r] = player.skillReadyTick.map((readyTick) => Math.max(0, readyTick - this.tick));
+      entry.skillCooldownTicks = [q, e, r];
+    }
+    const statuses = visibleStatuses(player.status, this.tick);
+    if (statuses) entry.statuses = statuses;
+    return entry;
+  }
+}
+
+function isAlive(player: ServerPlayer): boolean {
+  return player.heroId !== null && player.respawnAtTick === null;
 }

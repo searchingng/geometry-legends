@@ -31,8 +31,7 @@ export class SnapshotBuffer {
     let older: Vec2 | undefined;
     let olderTick = 0;
     for (const snapshot of this.snapshots) {
-      const player = snapshot.players.find((candidate) => candidate.id === playerId);
-      if (!player) continue;
+      const player = snapshot.visible.find((candidate) => candidate.id === playerId);
 
       if (snapshot.tick <= renderTick) {
         older = player;
@@ -40,7 +39,7 @@ export class SnapshotBuffer {
         continue;
       }
 
-      if (!older) return { x: player.x, y: player.y };
+      if (!older || !player) return older && { x: older.x, y: older.y };
       const t = (renderTick - olderTick) / (snapshot.tick - olderTick);
       return { x: lerp(older.x, player.x, t), y: lerp(older.y, player.y, t) };
     }

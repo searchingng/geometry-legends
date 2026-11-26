@@ -7,7 +7,10 @@ import {
   HemisphereLight,
   type Object3D,
   PerspectiveCamera,
+  Plane,
+  Raycaster,
   Scene,
+  Vector2,
   Vector3,
   WebGLRenderer,
 } from "three";
@@ -22,6 +25,14 @@ const CAMERA_PITCH_DEG = 56;
 const MAX_BASE_PIXEL_RATIO = 1.5;
 const SOFTWARE_INITIAL_SCALE = 0.6;
 const MAX_FRAME_MS = 250;
+const SHAKE_MAX_OFFSET = 16;
+const SHAKE_DECAY_PER_MS = 1 / 320;
+const SHAKE_FREQUENCY = 0.045;
+
+export interface ScreenPoint {
+  x: number;
+  y: number;
+}
 
 export class SceneRenderer {
   readonly scene = new Scene();
@@ -32,6 +43,10 @@ export class SceneRenderer {
   private readonly basePixelRatio: number;
   private readonly cameraOffset: Vector3;
   private readonly focus = new Vector3();
+  private readonly shakeOffset = new Vector3();
+  private readonly projected = new Vector3();
+  private trauma = 0;
+  private lastShakeAt = performance.now();
 
   constructor(container: HTMLElement, map: GameMap) {
     this.gpu = probeGpu();
@@ -70,14 +85,60 @@ export class SceneRenderer {
     this.scene.add(object);
   }
 
+  screenToGround(clientX: number, clientY: number): Vec2 | undefined {
+    const ndc = new Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+    const raycaster = new Raycaster();
+    raycaster.setFromCamera(ndc, this.camera);
+    const hit = raycaster.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), 0), new Vector3());
+    return hit ? { x: hit.x, y: hit.z } : undefined;
+  }
+
   follow(position: Vec2) {
     this.focus.set(position.x, 0, position.y);
+    this.placeCamera();
+  }
+
+  shake(intensity: number) {
+    this.trauma = Math.min(1, this.trauma + Math.max(0, intensity));
+  }
+
+  worldToScreen(point: Vec2, height: number, out: ScreenPoint): boolean {
+    this.projected.set(point.x, height, point.y).project(this.camera);
+    if (this.projected.z > 1) return false;
+    out.x = (this.projected.x + 1) * 0.5 * window.innerWidth;
+    out.y = (1 - this.projected.y) * 0.5 * window.innerHeight;
+    return true;
   }
 
   render() {
-    this.camera.position.copy(this.focus).add(this.cameraOffset);
-    this.camera.lookAt(this.focus);
+    this.updateShake();
+    this.placeCamera();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private placeCamera() {
+    this.camera.position.copy(this.focus).add(this.cameraOffset).add(this.shakeOffset);
+    this.camera.lookAt(this.focus.x + this.shakeOffset.x, this.shakeOffset.y, this.focus.z + this.shakeOffset.z);
+    this.camera.updateMatrixWorld();
+  }
+
+  private updateShake() {
+    const now = performance.now();
+    const elapsed = Math.min(now - this.lastShakeAt, MAX_FRAME_MS);
+    this.lastShakeAt = now;
+    if (this.trauma <= 0) {
+      this.shakeOffset.set(0, 0, 0);
+      return;
+    }
+
+    this.trauma = Math.max(0, this.trauma - elapsed * SHAKE_DECAY_PER_MS);
+    const amplitude = this.trauma * this.trauma * SHAKE_MAX_OFFSET;
+    const phase = now * SHAKE_FREQUENCY;
+    this.shakeOffset.set(
+      amplitude * Math.sin(phase * 1.7),
+      amplitude * 0.5 * Math.sin(phase * 2.3 + 1.1),
+      amplitude * Math.sin(phase * 1.3 + 2.4),
+    );
   }
 
   onFrame(callback: (frameMs: number) => void) {

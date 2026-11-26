@@ -1,0 +1,60 @@
+.rc-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(3, 5, 12, 0.55);
+  color: #e6ebff;
+  font: 700 20px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace;
+  text-shadow: 0 2px 4px #000;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.rc-overlay[hidden] {
+  display: none;
+}
+
+.rc-overlay:not(.rc-lost) .rc-message {
+  animation: rc-blink 1s ease-in-out infinite alternate;
+}
+
+.rc-overlay.rc-lost {
+  background: rgba(3, 5, 12, 0.8);
+  pointer-events: auto;
+}
+
+.rc-lost .rc-message {
+  color: #ff8a8a;
+}
+
+.rc-button {
+  padding: 8px 22px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  background: #1d2a55;
+  color: #e6ebff;
+  font: 700 15px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.rc-button[hidden] {
+  display: none;
+}
+
+.rc-button:hover {
+  background: #2a3b75;
+}
+
+@keyframes rc-blink {
+  from {
+    opacity: 0.5;
+  }
+  to {
+    opacity: 1;
+  }
+}

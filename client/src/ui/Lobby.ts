@@ -14,6 +14,8 @@ export class Lobby {
 
   async connect(initialCode: string | null): Promise<Connection> {
     if (initialCode) {
+      const resumed = await Connection.resume(this.options, normalizeRoomCode(initialCode));
+      if (resumed) return resumed;
       try {
         return await this.attempt(() => this.join(initialCode));
       } catch {

@@ -1,0 +1,108 @@
+.cf-layer {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.cf-number {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  will-change: transform, opacity;
+  font: 700 18px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #f4f6ff;
+  white-space: nowrap;
+  text-shadow:
+    0 0 3px #000,
+    0 2px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.cf-dealt {
+  color: #ffc861;
+}
+
+.cf-taken {
+  color: #ff4d4d;
+  font-size: 24px;
+}
+
+.cf-heal {
+  color: #5dff8a;
+}
+
+.cf-absorb {
+  color: #9fc4ff;
+  font-size: 15px;
+}
+
+.cf-banner {
+  position: fixed;
+  top: 14%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  padding: 8px 22px;
+  border-radius: 6px;
+  font: 700 22px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-shadow: 0 2px 4px #000;
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.55) 20%, rgba(0, 0, 0, 0.55) 80%, transparent);
+  pointer-events: none;
+  z-index: 20;
+}
+
+.cf-banner-kill {
+  color: #ffd36b;
+}
+
+.cf-banner-death {
+  color: #ff6b6b;
+}
+
+.cf-vignette {
+  position: fixed;
+  inset: 0;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(200, 0, 20, 0.45) 100%);
+  transition: opacity 300ms;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.cf-vignette.cf-active {
+  animation: cf-pulse 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes cf-pulse {
+  from {
+    opacity: 0.55;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.cf-mute {
+  position: fixed;
+  top: 36px;
+  right: 14px;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  color: #cfd6ff;
+  font: 12px/1 ui-monospace, "Cascadia Code", Consolas, monospace;
+  cursor: pointer;
+  user-select: none;
+  pointer-events: auto;
+  z-index: 20;
+}
+
+.cf-mute.cf-muted {
+  color: #ff8a8a;
+}

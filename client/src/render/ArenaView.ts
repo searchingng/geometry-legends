@@ -6,6 +6,7 @@ import {
   Group,
   LineBasicMaterial,
   LineSegments,
+  type Material,
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
@@ -13,6 +14,8 @@ import {
 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import type { GameMap, Rect } from "@moba/shared";
+import { BushView } from "./BushView.js";
+import type { VisionFog } from "./VisionFog.js";
 
 const GRID_SIZE = 50;
 const WALL_HEIGHT = 70;
@@ -20,21 +23,33 @@ const BORDER_HEIGHT = 18;
 const BORDER_THICKNESS = 12;
 const NEON_BLUE = 0x6f86ff;
 const SHADOW_SHIFT_PER_HEIGHT = { x: 0.42, z: -0.33 };
+const WALL_LOS_BIAS = 28;
 
 interface Block {
   rect: Rect;
   height: number;
 }
 
-export function createArenaView(map: GameMap): Group {
+export interface ArenaView {
+  root: Group;
+  bushes: BushView;
+}
+
+export function createArenaView(map: GameMap, visionFog: VisionFog): ArenaView {
   const blocks: Block[] = [
     ...map.walls.map((rect) => ({ rect, height: WALL_HEIGHT })),
     ...borderRects(map).map((rect) => ({ rect, height: BORDER_HEIGHT })),
   ];
 
-  const arena = new Group();
-  arena.add(createFloor(map), createGrid(map), createFakeShadows(blocks), ...createBlocks(blocks));
-  return arena;
+  const ground = [createFloor(map), createGrid(map), createFakeShadows(blocks)];
+  const walls = createBlocks(blocks);
+  for (const object of ground) visionFog.apply(object.material as Material);
+  for (const object of walls) visionFog.apply(object.material as Material, WALL_LOS_BIAS);
+
+  const bushes = new BushView(map.bushes ?? [], visionFog);
+  const root = new Group();
+  root.add(...ground, bushes.root, ...walls);
+  return { root, bushes };
 }
 
 function createFloor(map: GameMap): Mesh {

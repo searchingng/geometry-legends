@@ -1,10 +1,8 @@
 import {
   AdditiveBlending,
   type Blending,
-  BoxGeometry,
   type BufferGeometry,
   Color,
-  CylinderGeometry,
   DoubleSide,
   EdgesGeometry,
   Group,
@@ -19,12 +17,12 @@ import {
   RingGeometry,
   Shape,
   ShapeGeometry,
-  SphereGeometry,
   Sprite,
   SpriteMaterial,
 } from "three";
-import type { HeroDefinition, HeroShape, Vec2 } from "@moba/shared";
+import type { HeroDefinition, Vec2 } from "@moba/shared";
 import type { HeroRenderer, HeroView } from "./HeroRenderer.js";
+import { createBodyGeometry } from "./HeroShapes.js";
 import { radialGradientTexture } from "./textures.js";
 
 const ALLY_COLOR = 0x5dffa0;
@@ -37,6 +35,14 @@ const MOVE_BLEND_HALF_LIFE_MS = 90;
 const MOVING_SPEED_THRESHOLD = 20;
 const MIN_FACING_STEP = 0.3;
 const LEAN_ANGLE = 0.14;
+const HP_BAR_WIDTH = 56;
+const HP_BAR_HEIGHT = 7;
+const HP_BAR_BORDER = 3;
+const HP_BAR_GAP = 26;
+const BASE_EMISSIVE = 0.4;
+const FLASH_EMISSIVE = 2.2;
+const FLASH_MS = 140;
+const CONCEALED_OPACITY = 0.45;
 
 export class MeshHeroRenderer implements HeroRenderer {
   create(hero: HeroDefinition, isLocal: boolean): HeroView {
@@ -49,6 +55,12 @@ class MeshHeroView implements HeroView {
   private readonly pivot = new Group();
   private readonly body = new Group();
   private readonly arrow: Mesh<ShapeGeometry, MeshBasicMaterial>;
+  private readonly bodyMaterial: MeshLambertMaterial;
+  private readonly edgeMaterial: LineBasicMaterial;
+  private readonly hpFill: Sprite;
+  private concealed = false;
+  private healthFraction = 1;
+  private flashRemainingMs = 0;
   private readonly radius: number;
   private readonly bodyHeight: number;
   private lastPosition: Vec2 | undefined;
@@ -63,14 +75,15 @@ class MeshHeroView implements HeroView {
     const teamColor = isLocal ? ALLY_COLOR : ENEMY_COLOR;
 
     const geometry = createBodyGeometry(shape, this.radius, this.bodyHeight);
-    const mesh = new Mesh(
-      geometry,
-      new MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.4, flatShading: true }),
-    );
-    const edges = new LineSegments(
-      new EdgesGeometry(geometry),
-      new LineBasicMaterial({ color: new Color(color).lerp(new Color(0xffffff), 0.6) }),
-    );
+    this.bodyMaterial = new MeshLambertMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: BASE_EMISSIVE,
+      flatShading: true,
+    });
+    const mesh = new Mesh(geometry, this.bodyMaterial);
+    this.edgeMaterial = new LineBasicMaterial({ color: new Color(color).lerp(new Color(0xffffff), 0.6) });
+    const edges = new LineSegments(new EdgesGeometry(geometry), this.edgeMaterial);
     this.body.add(mesh, edges, createHalo(this.radius, color));
 
     this.arrow = new Mesh(
@@ -86,6 +99,27 @@ class MeshHeroView implements HeroView {
       createTeamRing(this.radius, teamColor),
       this.pivot,
     );
+
+    const barY = this.bodyHeight + HOVER_HEIGHT + HP_BAR_GAP;
+    const hpBackground = createBarSprite(0x05070d, 0.85);
+    hpBackground.scale.set(HP_BAR_WIDTH + HP_BAR_BORDER, HP_BAR_HEIGHT + HP_BAR_BORDER, 1);
+    hpBackground.position.y = barY;
+    this.hpFill = createBarSprite(teamColor, 1);
+    this.hpFill.center.set(0, 0.5);
+    this.hpFill.scale.set(HP_BAR_WIDTH, HP_BAR_HEIGHT, 1);
+    this.hpFill.position.set(-HP_BAR_WIDTH / 2, barY, 0);
+    this.hpFill.renderOrder = hpBackground.renderOrder + 1;
+    this.root.add(hpBackground, this.hpFill);
+  }
+
+  setHealth(fraction: number) {
+    if (fraction === this.healthFraction) return;
+    this.healthFraction = fraction;
+    this.hpFill.scale.x = Math.max(HP_BAR_WIDTH * fraction, 0.001);
+  }
+
+  flash() {
+    this.flashRemainingMs = FLASH_MS;
   }
 
   update(position: Vec2, frameMs: number) {
@@ -101,6 +135,27 @@ class MeshHeroView implements HeroView {
 
     this.arrow.position.x = this.radius + 14 + this.moveBlend * 8;
     this.arrow.material.opacity = 0.3 + 0.7 * this.moveBlend;
+
+    if (this.flashRemainingMs > 0) {
+      this.flashRemainingMs = Math.max(0, this.flashRemainingMs - frameMs);
+      const t = this.flashRemainingMs / FLASH_MS;
+      this.bodyMaterial.emissiveIntensity = BASE_EMISSIVE + (FLASH_EMISSIVE - BASE_EMISSIVE) * t;
+    }
+  }
+
+  setConcealed(concealed: boolean) {
+    if (concealed === this.concealed) return;
+    this.concealed = concealed;
+    for (const material of [this.bodyMaterial, this.edgeMaterial]) {
+      material.transparent = concealed;
+      material.opacity = concealed ? CONCEALED_OPACITY : 1;
+      material.needsUpdate = true;
+    }
+  }
+
+  setVisible(visible: boolean) {
+    if (visible && !this.root.visible) this.lastPosition = undefined;
+    this.root.visible = visible;
   }
 
   private updateFacing(position: Vec2, frameMs: number) {
@@ -138,19 +193,6 @@ function smoothing(frameMs: number, halfLifeMs: number): number {
   return 1 - Math.pow(0.5, frameMs / halfLifeMs);
 }
 
-function createBodyGeometry(shape: HeroShape, radius: number, height: number): BufferGeometry {
-  switch (shape) {
-    case "triangle":
-      return new CylinderGeometry(radius * 1.1, radius * 1.1, height, 3).rotateY(Math.PI / 2);
-    case "hexagon":
-      return new CylinderGeometry(radius, radius, height, 6).rotateY(Math.PI / 2);
-    case "square":
-      return new BoxGeometry(radius * 1.6, height, radius * 1.6);
-    case "circle":
-      return new SphereGeometry(radius * 0.95, 20, 14);
-  }
-}
-
 function createChevronGeometry(): ShapeGeometry {
   const chevron = new Shape()
     .moveTo(0, -11)
@@ -174,6 +216,21 @@ function createHalo(radius: number, color: number): Sprite {
   );
   halo.scale.setScalar(radius * 3.6);
   return halo;
+}
+
+function createBarSprite(color: number, opacity: number): Sprite {
+  const sprite = new Sprite(
+    new SpriteMaterial({
+      color,
+      opacity,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      fog: false,
+    }),
+  );
+  sprite.renderOrder = 10;
+  return sprite;
 }
 
 function createGroundDecal(

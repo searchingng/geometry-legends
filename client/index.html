@@ -20,6 +20,37 @@
       <span id="hud-stats"></span>
     </div>
 
+    <div id="hud-vitals" hidden>
+      <div id="hud-respawn" hidden>Respawning in <strong id="hud-respawn-time"></strong></div>
+      <div id="skill-bar" data-ui hidden>
+        <div class="skill-slot" data-slot="0">
+          <div class="skill-icon"></div>
+          <div class="skill-cooldown"></div>
+          <span class="skill-cd-text"></span>
+          <kbd>Q</kbd>
+          <span class="skill-name"></span>
+        </div>
+        <div class="skill-slot" data-slot="1">
+          <div class="skill-icon"></div>
+          <div class="skill-cooldown"></div>
+          <span class="skill-cd-text"></span>
+          <kbd>E</kbd>
+          <span class="skill-name"></span>
+        </div>
+        <div class="skill-slot" data-slot="2">
+          <div class="skill-icon"></div>
+          <div class="skill-cooldown"></div>
+          <span class="skill-cd-text"></span>
+          <kbd>R</kbd>
+          <span class="skill-name"></span>
+        </div>
+      </div>
+      <div id="hud-hp">
+        <div id="hud-hp-fill"></div>
+        <span id="hud-hp-text"></span>
+      </div>
+    </div>
+
     <div id="lobby" hidden>
       <div class="lobby-card">
         <h1>Moba2D</h1>
@@ -30,6 +61,14 @@
           <button type="submit">Join</button>
         </form>
         <p id="lobby-error" role="alert"></p>
+      </div>
+    </div>
+
+    <div id="hero-picker" hidden>
+      <div class="picker-panel">
+        <h2>Choose your hero</h2>
+        <div id="hero-list"></div>
+        <p class="picker-hint">Click a hero or press its number</p>
       </div>
     </div>
 

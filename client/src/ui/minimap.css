@@ -1,0 +1,17 @@
+#minimap {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  border: 1px solid rgba(111, 134, 255, 0.55);
+  border-radius: 6px;
+  background: rgba(5, 8, 16, 0.85);
+  box-shadow: 0 0 12px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  #minimap {
+    right: 8px;
+    bottom: 8px;
+  }
+}
