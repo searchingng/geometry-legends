@@ -1,5 +1,5 @@
-app = "moba2d"
-primary_region = "fra"
+app = "geometry-legends"
+primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
