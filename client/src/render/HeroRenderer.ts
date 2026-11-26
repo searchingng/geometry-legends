@@ -6,11 +6,12 @@ export interface HeroView {
   update(position: Vec2, frameMs: number): void;
   setVisible(visible: boolean): void;
   setConcealed(concealed: boolean): void;
+  setProtected(isProtected: boolean): void;
   setHealth(fraction: number): void;
   flash(): void;
   destroy(): void;
 }
 
 export interface HeroRenderer {
-  create(hero: HeroDefinition, isLocal: boolean): HeroView;
+  create(hero: HeroDefinition, isLocal: boolean, name: string): HeroView;
 }

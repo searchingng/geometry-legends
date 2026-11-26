@@ -41,13 +41,13 @@ export function createBodyGeometry(shape: HeroShape, radius: number, height: num
 }
 
 function createCross(radius: number, height: number): BufferGeometry {
-  const arm = radius * 0.7;
-  const span = radius * 2;
-  const geometry = mergeGeometries([
-    new BoxGeometry(span, height, arm).toNonIndexed(),
-    new BoxGeometry(arm, height, span).toNonIndexed(),
+  const arm = radius * 0.5;
+  const span = radius * 2.4;
+  const thickness = height * 0.7;
+  return mergeGeometries([
+    new BoxGeometry(span, thickness, arm).toNonIndexed(),
+    new BoxGeometry(arm, thickness, span).toNonIndexed(),
   ]);
-  return geometry.rotateY(Math.PI / 4);
 }
 
 function createStar(radius: number, height: number): BufferGeometry {

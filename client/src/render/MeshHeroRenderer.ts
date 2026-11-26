@@ -1,4 +1,5 @@
 import {
+  CylinderGeometry,
   AdditiveBlending,
   type Blending,
   type BufferGeometry,
@@ -23,7 +24,7 @@ import {
 import type { HeroDefinition, Vec2 } from "@moba/shared";
 import type { HeroRenderer, HeroView } from "./HeroRenderer.js";
 import { createBodyGeometry } from "./HeroShapes.js";
-import { radialGradientTexture } from "./textures.js";
+import { labelTexture, radialGradientTexture } from "./textures.js";
 
 const ALLY_COLOR = 0x5dffa0;
 const ENEMY_COLOR = 0xff5a5a;
@@ -39,14 +40,20 @@ const HP_BAR_WIDTH = 56;
 const HP_BAR_HEIGHT = 7;
 const HP_BAR_BORDER = 3;
 const HP_BAR_GAP = 26;
+const NAME_HEIGHT = 13;
+const NAME_GAP = 4;
+const ALLY_NAME_COLOR = "#c9ffdf";
+const ENEMY_NAME_COLOR = "#ffd0d0";
 const BASE_EMISSIVE = 0.4;
 const FLASH_EMISSIVE = 2.2;
 const FLASH_MS = 140;
 const CONCEALED_OPACITY = 0.45;
+const PROTECTION_COLOR = 0xffd34d;
+const PROTECTION_PULSE_SPEED = 0.012;
 
 export class MeshHeroRenderer implements HeroRenderer {
-  create(hero: HeroDefinition, isLocal: boolean): HeroView {
-    return new MeshHeroView(hero, isLocal);
+  create(hero: HeroDefinition, isLocal: boolean, name: string): HeroView {
+    return new MeshHeroView(hero, isLocal, name);
   }
 }
 
@@ -59,6 +66,7 @@ class MeshHeroView implements HeroView {
   private readonly edgeMaterial: LineBasicMaterial;
   private readonly hpFill: Sprite;
   private concealed = false;
+  private readonly protection: Mesh<CylinderGeometry, MeshBasicMaterial>;
   private healthFraction = 1;
   private flashRemainingMs = 0;
   private readonly radius: number;
@@ -68,7 +76,7 @@ class MeshHeroView implements HeroView {
   private moveBlend = 0;
   private elapsedMs = Math.random() * 1000;
 
-  constructor(hero: HeroDefinition, isLocal: boolean) {
+  constructor(hero: HeroDefinition, isLocal: boolean, name: string) {
     const { color, shape } = hero.visual;
     this.radius = hero.radius;
     this.bodyHeight = hero.radius * 1.3;
@@ -109,7 +117,26 @@ class MeshHeroView implements HeroView {
     this.hpFill.scale.set(HP_BAR_WIDTH, HP_BAR_HEIGHT, 1);
     this.hpFill.position.set(-HP_BAR_WIDTH / 2, barY, 0);
     this.hpFill.renderOrder = hpBackground.renderOrder + 1;
-    this.root.add(hpBackground, this.hpFill);
+    this.root.add(hpBackground, this.hpFill, createNameLabel(name, isLocal, barY));
+
+    this.protection = new Mesh(
+      new CylinderGeometry(this.radius * 1.5, this.radius * 1.5, this.bodyHeight + 18, 24, 1, true),
+      new MeshBasicMaterial({
+        color: PROTECTION_COLOR,
+        transparent: true,
+        opacity: 0.3,
+        blending: AdditiveBlending,
+        depthWrite: false,
+        side: DoubleSide,
+      }),
+    );
+    this.protection.position.y = (this.bodyHeight + 18) / 2;
+    this.protection.visible = false;
+    this.root.add(this.protection);
+  }
+
+  setProtected(isProtected: boolean) {
+    this.protection.visible = isProtected;
   }
 
   setHealth(fraction: number) {
@@ -135,6 +162,11 @@ class MeshHeroView implements HeroView {
 
     this.arrow.position.x = this.radius + 14 + this.moveBlend * 8;
     this.arrow.material.opacity = 0.3 + 0.7 * this.moveBlend;
+
+    if (this.protection.visible) {
+      this.protection.material.opacity = 0.18 + 0.14 * Math.sin(this.elapsedMs * PROTECTION_PULSE_SPEED) ** 2;
+      this.protection.rotation.y += frameMs * 0.002;
+    }
 
     if (this.flashRemainingMs > 0) {
       this.flashRemainingMs = Math.max(0, this.flashRemainingMs - frameMs);
@@ -181,7 +213,10 @@ class MeshHeroView implements HeroView {
   destroy() {
     this.root.removeFromParent();
     this.root.traverse((object) => {
-      if (object instanceof Sprite) object.material.dispose();
+      if (object instanceof Sprite) {
+        if (object.userData.ownsMap) object.material.map?.dispose();
+        object.material.dispose();
+      }
       if (!(object instanceof Mesh || object instanceof LineSegments)) return;
       (object.geometry as BufferGeometry).dispose();
       (object.material as Material).dispose();
@@ -216,6 +251,19 @@ function createHalo(radius: number, color: number): Sprite {
   );
   halo.scale.setScalar(radius * 3.6);
   return halo;
+}
+
+function createNameLabel(name: string, isLocal: boolean, barY: number): Sprite {
+  const { texture, aspect } = labelTexture(name, isLocal ? ALLY_NAME_COLOR : ENEMY_NAME_COLOR);
+  const label = new Sprite(
+    new SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false, fog: false }),
+  );
+  label.userData.ownsMap = true;
+  label.renderOrder = 11;
+  label.center.set(0.5, 0);
+  label.scale.set(NAME_HEIGHT * aspect, NAME_HEIGHT, 1);
+  label.position.y = barY + (HP_BAR_HEIGHT + HP_BAR_BORDER) / 2 + NAME_GAP;
+  return label;
 }
 
 function createBarSprite(color: number, opacity: number): Sprite {

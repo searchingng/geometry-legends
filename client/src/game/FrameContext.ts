@@ -29,6 +29,8 @@ export interface FrameContext {
   myPosition: Vec2 | undefined;
   me: VisiblePlayer | undefined;
   dead: boolean;
+  spectating: boolean;
+  inputLocked: boolean;
   enemies: VisibleEnemy[];
   viewPosition: PositionLookup;
 }

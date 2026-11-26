@@ -54,6 +54,10 @@
     <div id="lobby" hidden>
       <div class="lobby-card">
         <h1>Moba2D</h1>
+        <label class="lobby-name">
+          <span>Username</span>
+          <input id="lobby-name" autocomplete="nickname" spellcheck="false" />
+        </label>
         <button id="lobby-create" type="button" class="primary">Create game</button>
         <div class="lobby-divider">or join / create with a code</div>
         <form id="lobby-join">
@@ -61,6 +65,8 @@
           <button type="submit">Join</button>
         </form>
         <p id="lobby-error" role="alert"></p>
+        <div class="lobby-divider">open rooms</div>
+        <div id="lobby-rooms"></div>
       </div>
     </div>
 
@@ -68,7 +74,7 @@
       <div class="picker-panel">
         <h2>Choose your hero</h2>
         <div id="hero-list"></div>
-        <p class="picker-hint">Click a hero or press its number</p>
+        <p class="picker-hint">Click a hero or press its number · pick within 60 seconds or your seat is freed</p>
       </div>
     </div>
 

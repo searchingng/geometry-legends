@@ -1,9 +1,17 @@
 import { Client, type Room } from "colyseus.js";
-import { DEFAULT_SERVER_PORT, ROOM_NAME } from "@moba/shared";
+import {
+  DEFAULT_SERVER_PORT,
+  IDENTITY_API_PATH,
+  PICK_TIMEOUT_CLOSE_CODE,
+  ROOMS_API_PATH,
+  ROOM_NAME,
+  type JoinOptions,
+} from "@moba/shared";
 
 export interface ConnectionOptions {
   serverUrl: string;
   simulatedLagMs: number;
+  spectate: boolean;
 }
 
 export type ConnectionStatus = "connected" | "reconnecting" | "lost";
@@ -23,7 +31,24 @@ export function connectionOptionsFromEnvironment(): ConnectionOptions {
   return {
     serverUrl: import.meta.env.VITE_SERVER_URL ?? defaultUrl,
     simulatedLagMs: Math.max(0, Number(params.get("lag")) || 0),
+    spectate: params.get("spectate") === "1",
   };
+}
+
+export function roomsApiUrl(options: ConnectionOptions): string {
+  return apiUrl(options, ROOMS_API_PATH);
+}
+
+export function defaultIdentityUrl(options: ConnectionOptions): string {
+  return apiUrl(options, `${IDENTITY_API_PATH}/default`);
+}
+
+function apiUrl(options: ConnectionOptions, path: string): string {
+  const url = new URL(options.serverUrl);
+  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
+  url.pathname = path;
+  url.search = "";
+  return url.toString();
 }
 
 type MessageHandler = (payload: unknown) => void;
@@ -31,6 +56,9 @@ type MessageHandler = (payload: unknown) => void;
 export class Connection {
   private room!: Room;
   private status: ConnectionStatus = "connected";
+  private spectating = false;
+  closeCode: number | undefined;
+  private leaving = false;
   private readonly messageHandlers: [string, MessageHandler][] = [];
   private readonly leaveHandlers: ((code: number) => void)[] = [];
   private readonly statusListeners: ((status: ConnectionStatus) => void)[] = [];
@@ -46,15 +74,15 @@ export class Connection {
     this.attach(room);
   }
 
-  static async create(options: ConnectionOptions, roomCode?: string): Promise<Connection> {
+  static async create(options: ConnectionOptions, join: JoinOptions, roomCode?: string): Promise<Connection> {
     const client = new Client(options.serverUrl);
-    const room = await client.create(ROOM_NAME, roomCode ? { roomCode } : {});
+    const room = await client.create(ROOM_NAME, roomCode ? { ...join, roomCode } : join);
     return new Connection(client, room, options, false);
   }
 
-  static async joinByCode(options: ConnectionOptions, code: string): Promise<Connection> {
+  static async joinByCode(options: ConnectionOptions, code: string, join: JoinOptions = {}): Promise<Connection> {
     const client = new Client(options.serverUrl);
-    const room = await client.joinById(code);
+    const room = await client.joinById(code, join);
     return new Connection(client, room, options, false);
   }
 
@@ -83,6 +111,15 @@ export class Connection {
     return this.status;
   }
 
+  get isSpectator(): boolean {
+    return this.spectating;
+  }
+
+  markSpectator() {
+    this.spectating = true;
+    clearToken(this.room.roomId);
+  }
+
   send(type: string, payload: unknown) {
     this.delay(() => {
       if (this.status === "connected") this.room.send(type, payload);
@@ -105,7 +142,7 @@ export class Connection {
 
   private attach(room: Room) {
     this.room = room;
-    writeToken(room.roomId, room.reconnectionToken);
+    if (!this.spectating) writeToken(room.roomId, room.reconnectionToken);
     for (const [type, handler] of this.messageHandlers) this.listen(room, type, handler);
     room.onLeave((code) => {
       if (this.room === room) void this.handleLeave(code);
@@ -120,8 +157,19 @@ export class Connection {
     );
   }
 
+  async leave() {
+    this.leaving = true;
+    clearToken(this.room.roomId);
+    try {
+      await this.room.leave(true);
+    } catch {
+      return;
+    }
+  }
+
   private async handleLeave(code: number) {
-    if (code === CONSENTED_CLOSE_CODE) {
+    if (this.leaving) return;
+    if (code === CONSENTED_CLOSE_CODE || code === PICK_TIMEOUT_CLOSE_CODE) {
       this.lose(code);
       return;
     }
@@ -136,7 +184,9 @@ export class Connection {
       await wait(Math.min(retryMs, Math.max(0, deadline - performance.now())));
       retryMs = Math.min(retryMs * 2, MAX_RETRY_MS);
       try {
-        const room = await this.client.reconnect(token);
+        const room = this.spectating
+          ? await this.client.joinById(roomCode, { spectate: true } satisfies JoinOptions)
+          : await this.client.reconnect(token);
         this.attach(room);
         this.setStatus("connected");
         return;
@@ -150,6 +200,7 @@ export class Connection {
   }
 
   private lose(code: number) {
+    this.closeCode = code;
     clearToken(this.room.roomId);
     this.setStatus("lost");
     for (const handler of this.leaveHandlers) handler(code);

@@ -28,6 +28,8 @@ const MAX_FRAME_MS = 250;
 const SHAKE_MAX_OFFSET = 16;
 const SHAKE_DECAY_PER_MS = 1 / 320;
 const SHAKE_FREQUENCY = 0.045;
+const FOG_NEAR_PER_DISTANCE = 1400 / CAMERA_DISTANCE;
+const FOG_FAR_PER_DISTANCE = 2600 / CAMERA_DISTANCE;
 
 export interface ScreenPoint {
   x: number;
@@ -41,7 +43,9 @@ export class SceneRenderer {
   private readonly camera = new PerspectiveCamera(CAMERA_FOV, 1, 10, 5000);
   private readonly resolution: DynamicResolution;
   private readonly basePixelRatio: number;
-  private readonly cameraOffset: Vector3;
+  private readonly cameraDirection: Vector3;
+  private readonly cameraOffset = new Vector3();
+  private readonly fog = new Fog(BACKGROUND, 1400, 2600);
   private readonly focus = new Vector3();
   private readonly shakeOffset = new Vector3();
   private readonly projected = new Vector3();
@@ -66,11 +70,12 @@ export class SceneRenderer {
     );
 
     this.scene.background = new Color(BACKGROUND);
-    this.scene.fog = new Fog(BACKGROUND, 1400, 2600);
+    this.scene.fog = this.fog;
     this.addLights();
 
     const pitch = (CAMERA_PITCH_DEG * Math.PI) / 180;
-    this.cameraOffset = new Vector3(0, Math.sin(pitch) * CAMERA_DISTANCE, Math.cos(pitch) * CAMERA_DISTANCE);
+    this.cameraDirection = new Vector3(0, Math.sin(pitch), Math.cos(pitch));
+    this.setCameraDistance(CAMERA_DISTANCE);
     this.focus.set(map.width / 2, 0, map.height / 2);
 
     window.addEventListener("resize", () => this.resize());
@@ -96,6 +101,16 @@ export class SceneRenderer {
   follow(position: Vec2) {
     this.focus.set(position.x, 0, position.y);
     this.placeCamera();
+  }
+
+  get defaultCameraDistance(): number {
+    return CAMERA_DISTANCE;
+  }
+
+  setCameraDistance(distance: number) {
+    this.cameraOffset.copy(this.cameraDirection).multiplyScalar(distance);
+    this.fog.near = distance * FOG_NEAR_PER_DISTANCE;
+    this.fog.far = distance * FOG_FAR_PER_DISTANCE;
   }
 
   shake(intensity: number) {

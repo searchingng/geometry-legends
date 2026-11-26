@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex" />
+    <title>Moba2D Admin</title>
+  </head>
+  <body>
+    <form id="admin-login" class="admin-login" hidden>
+      <h1>Moba2D Admin</h1>
+      <input id="admin-username" name="username" placeholder="Username" autocomplete="username" required />
+      <input id="admin-password" name="password" type="password" placeholder="Password" autocomplete="current-password" required />
+      <button type="submit">Sign in</button>
+      <p id="admin-login-error" class="admin-error" role="alert"></p>
+    </form>
+
+    <div id="admin-app" class="admin-app" hidden>
+      <header class="admin-header">
+        <strong>Moba2D Admin</strong>
+        <nav class="admin-tabs">
+          <button type="button" data-tab="users">Users</button>
+          <button type="button" data-tab="matches">Matches</button>
+        </nav>
+        <button id="admin-logout" type="button" class="admin-link">Sign out</button>
+      </header>
+      <main>
+        <div class="admin-toolbar">
+          <input id="admin-search" type="search" placeholder="Search by username" autocomplete="off" spellcheck="false" />
+          <span id="admin-total"></span>
+        </div>
+        <p id="admin-error" class="admin-error" role="alert"></p>
+        <div class="admin-table-wrap">
+          <table id="admin-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="admin-pager">
+          <button id="admin-prev" type="button">Previous</button>
+          <span id="admin-page"></span>
+          <button id="admin-next" type="button">Next</button>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="/src/admin/main.ts"></script>
+  </body>
+</html>

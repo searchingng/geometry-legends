@@ -56,6 +56,11 @@ async function serve(root: string, indexFile: string, req: IncomingMessage, res:
     sendFile(candidate, req, res);
     return;
   }
+  const page = insideRoot && candidate !== root && extname(candidate) === "" ? `${candidate}.html` : undefined;
+  if (page && (await isFile(page))) {
+    sendFile(page, req, res);
+    return;
+  }
   if (extname(pathname ?? "") !== "") {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("Not found");
     return;

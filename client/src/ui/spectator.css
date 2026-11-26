@@ -1,0 +1,110 @@
+.spectator-hud {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(560px, calc(100vw - 32px));
+  pointer-events: none;
+  font: 600 13px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #dfe6ff;
+  text-shadow: 0 0 6px rgba(0, 0, 0, 0.8);
+}
+
+.spectator-hud[hidden] {
+  display: none;
+}
+
+.spectator-badge {
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 200, 80, 0.6);
+  border-radius: 999px;
+  background: rgba(30, 22, 4, 0.8);
+  color: #ffd36b;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.spectator-bars {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+}
+
+.spectator-seat {
+  --seat-color: #8a96c0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 10px;
+  border: 1px solid rgba(120, 140, 200, 0.35);
+  border-radius: 8px;
+  background: rgba(4, 6, 12, 0.8);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.spectator-seat.followed {
+  border-color: var(--seat-color);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--seat-color) 45%, transparent);
+}
+
+.spectator-seat.empty {
+  opacity: 0.6;
+}
+
+.spectator-seat-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spectator-key {
+  padding: 0 5px;
+  border: 1px solid rgba(160, 175, 230, 0.4);
+  border-radius: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.spectator-name {
+  flex: 1;
+  color: var(--seat-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spectator-value {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+.spectator-bar {
+  height: 7px;
+  border-radius: 4px;
+  background: #1c2540;
+  overflow: hidden;
+}
+
+.spectator-fill {
+  height: 100%;
+  background: var(--seat-color);
+  transition: width 0.15s;
+}
+
+.spectator-hint {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+@media (max-width: 640px) {
+  .spectator-hint {
+    display: none;
+  }
+}

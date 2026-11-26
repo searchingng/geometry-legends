@@ -1,11 +1,17 @@
-import { Room, type Client } from "colyseus";
+import { Room, type AuthContext, type Client } from "colyseus";
 import {
+  ALREADY_IN_ROOM,
   ARENA,
   INPUT_BUFFER_TICKS,
+  MAX_PLAYERS,
   MAX_QUEUED_INPUTS,
+  MAX_SPECTATORS,
   Message,
+  PICK_HERO_TIMEOUT_MS,
+  PICK_TIMEOUT_CLOSE_CODE,
   RECONNECT_WINDOW_SECONDS,
   RESPAWN_MS,
+  USERNAME_TAKEN,
   SPAWN_PROTECTION_MS,
   TICK_DT,
   TICK_MS,
@@ -16,12 +22,17 @@ import {
   isAttackMessage,
   isCastSkillMessage,
   isHeroId,
+  isUserKey,
   isValidMoveInput,
+  normalizeUsername,
+  sameUsername,
   shapeHits,
   stepMovement,
   type CastSkillMessage,
   type CombatEvent,
   type HeroId,
+  type JoinOptions,
+  type RoomSummary,
   type MoveInput,
   type SkillShape,
   type SnapshotMessage,
@@ -49,15 +60,28 @@ import {
   type ZoneVisibility,
 } from "./skills/SkillSystem.js";
 import { MatchController, type MatchTransition } from "./match/MatchController.js";
+import { recordMatch, services } from "./db/services.js";
+import { clientIp } from "./http/json.js";
 
 const LOOP_INTERVAL_MS = 4;
 const MAX_CATCH_UP_MS = 250;
 const RESPAWN_TICKS = Math.round(RESPAWN_MS / TICK_MS);
 const PROTECTION_TICKS = Math.round(SPAWN_PROTECTION_MS / TICK_MS);
 const ATTACKER_REVEAL_TICKS = 30;
+const SEQUENCE_RESTART_GAP = 90;
+const PICK_TIMEOUT_TICKS = Math.round(PICK_HERO_TIMEOUT_MS / TICK_MS);
+
+export const ROOM_FULL = "Room is full";
+export const ROOM_EMPTY = "Room has no players";
+export const USERNAME_REQUIRED = "Username is required";
+
+interface PlayerAuth {
+  username: string;
+}
 
 interface ServerPlayer {
   id: string;
+  name: string;
   slot: 0 | 1;
   heroId: HeroId | null;
   connected: boolean;
@@ -75,18 +99,28 @@ interface ServerPlayer {
   status: CombatStatus;
   skillReadyTick: [number, number, number];
   pendingCast: CastSkillMessage | null;
+  joinedAtTick: number;
 }
 
 type SpawnedPlayer = ServerPlayer & { heroId: HeroId };
 
+interface MatchLineup {
+  startedAt: Date;
+  players: { id: string; slot: 0 | 1; name: string; heroId: HeroId }[];
+}
+
 export class DuelRoom extends Room {
-  maxClients = 2;
+  maxClients = MAX_PLAYERS + MAX_SPECTATORS;
 
   private readonly players = new Map<string, ServerPlayer>();
+  private readonly spectators = new Set<string>();
+  private closing = false;
+  private metadataKey = "";
   private readonly vision = new VisionSystem();
   private readonly skills = new SkillSystem<SpawnedPlayer>();
   private readonly match = new MatchController();
   private events: CombatEvent[] = [];
+  private lineup: MatchLineup | null = null;
   private tick = 0;
   private lastLoopAt = performance.now();
   private accumulatorMs = 0;
@@ -100,12 +134,39 @@ export class DuelRoom extends Room {
     this.onMessage(Message.Rematch, (client) => this.voteRematch(client));
     this.onMessage(Message.Ping, (client, sentAt: unknown) => client.send(Message.Pong, sentAt));
     this.setSimulationInterval(() => this.loop(), LOOP_INTERVAL_MS);
+    this.syncMetadata();
   }
 
-  onJoin(client: Client) {
+  onAuth(_client: Client, options: JoinOptions | undefined, context: AuthContext): PlayerAuth {
+    const username = normalizeUsername(options?.name);
+    if (this.joinsAsSpectator(options)) return { username: username ?? "spectator" };
+    if (!username) throw new Error(USERNAME_REQUIRED);
+
+    const users = services()?.users;
+    if (!users) return { username };
+    if (!isUserKey(options?.userKey)) throw new Error(USERNAME_TAKEN);
+    const socketIp = Array.isArray(context.ip) ? context.ip[0] : context.ip;
+    const result = users.authenticate(username, options.userKey, clientIp(context.headers, socketIp));
+    if (!result.ok) throw new Error(USERNAME_TAKEN);
+    return { username: result.username };
+  }
+
+  onJoin(client: Client<unknown, PlayerAuth>, options?: JoinOptions) {
+    if (this.joinsAsSpectator(options)) {
+      if (this.players.size === 0) throw new Error(ROOM_EMPTY);
+      if (this.spectators.size >= MAX_SPECTATORS) throw new Error(ROOM_FULL);
+      this.spectators.add(client.sessionId);
+      this.syncMetadata();
+      return;
+    }
+
+    const name = client.auth?.username ?? "player";
+    if ([...this.players.values()].some((player) => sameUsername(player.name, name))) throw new Error(ALREADY_IN_ROOM);
+
     const slot = this.freeSlot();
     this.players.set(client.sessionId, {
       id: client.sessionId,
+      name,
       slot,
       heroId: null,
       connected: true,
@@ -123,10 +184,20 @@ export class DuelRoom extends Room {
       status: createStatus(),
       skillReadyTick: [0, 0, 0],
       pendingCast: null,
+      joinedAtTick: this.tick,
     });
+    this.syncMetadata();
+  }
+
+  private joinsAsSpectator(options: JoinOptions | undefined): boolean {
+    return options?.spectate === true || this.players.size >= MAX_PLAYERS;
   }
 
   async onLeave(client: Client, consented?: boolean) {
+    if (this.spectators.delete(client.sessionId)) {
+      this.syncMetadata();
+      return;
+    }
     const player = this.players.get(client.sessionId);
     if (!player) return;
     if (consented) {
@@ -153,6 +224,37 @@ export class DuelRoom extends Room {
     this.vision.clearRevealsInvolving(playerId);
     this.skills.removeActor(playerId);
     this.applyTransition(this.match.forfeit(playerId), this.spawnedPlayers());
+    if (this.players.size === 0) this.closeEmptyRoom();
+    else this.syncMetadata();
+  }
+
+  private removeIdlePickers() {
+    for (const player of [...this.players.values()]) {
+      if (player.heroId !== null || this.tick - player.joinedAtTick < PICK_TIMEOUT_TICKS) continue;
+      const client = this.clients.find((candidate) => candidate.sessionId === player.id);
+      this.removePlayer(player.id);
+      client?.leave(PICK_TIMEOUT_CLOSE_CODE);
+    }
+  }
+
+  private closeEmptyRoom() {
+    if (this.closing) return;
+    this.closing = true;
+    void this.disconnect();
+  }
+
+  private syncMetadata() {
+    const spawned = this.spawnedPlayers();
+    const metadata: Omit<RoomSummary, "code" | "maxPlayers"> = {
+      players: this.players.size,
+      spectators: this.spectators.size,
+      phase: this.match.phase,
+      heroes: spawned.map((player) => player.heroId),
+    };
+    const key = JSON.stringify(metadata);
+    if (key === this.metadataKey) return;
+    this.metadataKey = key;
+    void this.setMetadata(metadata);
   }
 
   private freeSlot(): 0 | 1 {
@@ -172,8 +274,11 @@ export class DuelRoom extends Room {
 
   private queueInput(client: Client, input: unknown) {
     const player = this.players.get(client.sessionId);
-    if (!player || player.heroId === null || !isAlive(player)) return;
-    if (!isValidMoveInput(input) || input.seq <= player.lastQueuedSeq) return;
+    if (!player || player.heroId === null || !isAlive(player) || !isValidMoveInput(input)) return;
+    if (input.seq + SEQUENCE_RESTART_GAP < player.lastQueuedSeq || (input.seq === 1 && player.lastQueuedSeq > 1)) {
+      restartInputSequence(player);
+    }
+    if (input.seq <= player.lastQueuedSeq) return;
     if (player.inputQueue.length >= MAX_QUEUED_INPUTS) return;
 
     player.lastQueuedSeq = input.seq;
@@ -213,6 +318,7 @@ export class DuelRoom extends Room {
   }
 
   private update() {
+    this.removeIdlePickers();
     const spawned = this.spawnedPlayers();
     this.applyTransition(this.match.update(this.tick, spawned.map((player) => player.id)), spawned);
 
@@ -255,23 +361,60 @@ export class DuelRoom extends Room {
     this.tick++;
     this.vision.prune(this.tick);
 
+    let spectatorSnapshot: SnapshotMessage | undefined;
     for (const client of this.clients) {
-      client.send(Message.Snapshot, this.snapshotFor(client.sessionId, spawned));
+      if (this.spectators.has(client.sessionId)) {
+        spectatorSnapshot ??= this.spectatorSnapshot(spawned);
+        client.send(Message.Snapshot, spectatorSnapshot);
+      } else {
+        client.send(Message.Snapshot, this.snapshotFor(client.sessionId, spawned));
+      }
     }
     this.events = [];
+    this.syncMetadata();
   }
 
   private applyTransition(transition: MatchTransition | null, spawned: SpawnedPlayer[]) {
     if (!transition) return;
-    if (transition === "countdown") this.resetForMatch(spawned);
-    if (transition === "playing") for (const player of spawned) this.protect(player);
+    if (transition === "countdown") {
+      this.lineup = null;
+      this.resetForMatch(spawned);
+    }
+    if (transition === "playing") {
+      this.lineup = {
+        startedAt: new Date(),
+        players: spawned.map(({ id, slot, name, heroId }) => ({ id, slot, name, heroId })),
+      };
+      for (const player of spawned) this.protect(player);
+    }
     if (transition === "ended") {
       for (const player of spawned) {
         player.pendingCast = null;
         player.attackLatched = false;
       }
+      this.saveFinishedMatch();
     }
     this.events.push({ kind: "matchPhase", phase: this.match.phase });
+  }
+
+  private saveFinishedMatch() {
+    const lineup = this.lineup;
+    this.lineup = null;
+    if (!lineup || !this.match.endReason) return;
+    const scores = this.match.view(this.tick, []).scores;
+    recordMatch({
+      roomCode: this.roomId,
+      startedAt: lineup.startedAt,
+      endedAt: new Date(),
+      endReason: this.match.endReason,
+      players: lineup.players.map((player) => ({
+        slot: player.slot,
+        username: player.name,
+        heroId: player.heroId,
+        kills: scores.find((score) => score.id === player.id)?.kills ?? 0,
+        won: this.match.winnerId === player.id,
+      })),
+    });
   }
 
   private resetForMatch(spawned: SpawnedPlayer[]) {
@@ -448,22 +591,38 @@ export class DuelRoom extends Room {
       }
     });
 
-    const snapshot: SnapshotMessage = {
-      tick: this.tick,
-      playersInRoom: this.players.size,
-      roster: spawned.map((player) => ({ id: player.id, heroId: player.heroId })),
-      visible: visible.map((player) => this.visiblePlayer(player, viewerId)),
-      match: this.match.view(
-        this.tick,
-        spawned.filter((player) => !player.connected).map((player) => player.id),
-      ),
-    };
+    const snapshot = this.baseSnapshot(spawned, visible, viewerId);
     if (events.length > 0) snapshot.events = events;
     const projectiles = this.skills.visibleProjectiles(projectileVisible);
     if (projectiles.length > 0) snapshot.projectiles = projectiles;
     const zones = this.skills.visibleZones(zoneVisible, this.tick);
     if (zones.length > 0) snapshot.zones = zones;
     return snapshot;
+  }
+
+  private spectatorSnapshot(spawned: SpawnedPlayer[]): SnapshotMessage {
+    const snapshot = this.baseSnapshot(spawned, spawned.filter(isAlive), "");
+    snapshot.spectating = true;
+    if (this.events.length > 0) snapshot.events = [...this.events];
+    const projectiles = this.skills.visibleProjectiles(() => true);
+    if (projectiles.length > 0) snapshot.projectiles = projectiles;
+    const zones = this.skills.visibleZones(() => true, this.tick);
+    if (zones.length > 0) snapshot.zones = zones;
+    return snapshot;
+  }
+
+  private baseSnapshot(spawned: SpawnedPlayer[], visible: SpawnedPlayer[], viewerId: string): SnapshotMessage {
+    return {
+      tick: this.tick,
+      playersInRoom: this.players.size,
+      roster: spawned.map((player) => ({ id: player.id, heroId: player.heroId, name: player.name })),
+      visible: visible.map((player) => this.visiblePlayer(player, viewerId)),
+      match: this.match.view(
+        this.tick,
+        spawned.filter((player) => !player.connected).map((player) => player.id),
+      ),
+      spectators: this.spectators.size,
+    };
   }
 
   private visiblePlayer(player: SpawnedPlayer, viewerId: string): VisiblePlayer {
@@ -483,6 +642,13 @@ export class DuelRoom extends Room {
     if (statuses) entry.statuses = statuses;
     return entry;
   }
+}
+
+function restartInputSequence(player: ServerPlayer) {
+  player.inputQueue = [];
+  player.awaitingInputBuffer = true;
+  player.lastQueuedSeq = 0;
+  player.lastProcessedSeq = 0;
 }
 
 function isAlive(player: ServerPlayer): boolean {

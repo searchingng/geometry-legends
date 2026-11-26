@@ -1,0 +1,112 @@
+.room-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.room-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid #1f2a50;
+  border-radius: 6px;
+  background: #090e1b;
+}
+
+.room-info {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.room-code {
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #9fb4ff;
+}
+
+.room-players.room-full {
+  color: #ff9f7a;
+}
+
+.room-heroes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.room-hero {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
+.room-hero::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hero-color, #888);
+}
+
+.room-phase {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.room-phase[data-phase="playing"] {
+  color: #7dff9e;
+  opacity: 0.9;
+}
+
+.room-phase[data-phase="countdown"] {
+  color: #ffd36b;
+  opacity: 0.9;
+}
+
+.room-spectators {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
+.room-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.room-actions button {
+  padding: 5px 10px;
+  border: 1px solid #2a3768;
+  border-radius: 6px;
+  background: #1d2a55;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.room-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.room-actions .room-watch {
+  background: transparent;
+}
+
+.room-list-status {
+  margin: 0;
+  font-size: 12px;
+  text-align: center;
+  opacity: 0.6;
+}
