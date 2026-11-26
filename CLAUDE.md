@@ -69,11 +69,9 @@ npm workspaces: `shared` (`@moba/shared`, imported by both sides), `server`, `cl
 - Snapshots are per viewer: enemies outside vision or in a bush are not sent. Spectators get everything.
 - Main goal is "no lag" on weak GPUs (integrated Intel); keep per-frame allocations low.
 
-## Done
+## Worklog (every session must follow)
 
-The original 10-item backlog is complete: combat core, skill system, skills for all heroes, match flow (5 kills or 10 min, rematch), reconnect, deploy (Docker/Fly), bushes + line of sight + minimap, game feel (effects, sounds, numbers), 10 heroes, tests + CI (`.github/workflows/ci.yml`).
-
-Latest work (uncommitted as of 2026-11-26): lobby room list with player counts (`/api/rooms`), empty rooms auto-close, full room → join as spectator (zoomed-out camera, sees inside bushes, `SpectatorHud`), 60 s hero-pick timeout, "Back to menu" on the end screen.
+Finished work is recorded in `WORKLOG.md`, not here. When a task is done, add one line at the top of its list: date, what changed, key files, committed or not. Keep it to one line and do not rewrite older entries. Read `WORKLOG.md` only when the task needs history (what was done, why something exists). If a task adds or moves files, also update the Layout tables above.
 
 ## Next tasks
 
