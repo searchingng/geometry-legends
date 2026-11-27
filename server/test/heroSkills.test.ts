@@ -199,13 +199,13 @@ describe("every hero skill resolves", () => {
 describe("new hero skill details", () => {
   it("dashes stop at walls", () => {
     const system = new SkillSystem<Actor>();
-    const kael = actor("kael", "kael", { x: 680, y: 450 });
+    const kael = actor("kael", "kael", { x: 520, y: 610 });
     const world = new TestWorld([kael]);
 
-    system.cast(kael, 0, { x: 1000, y: 450 }, world);
+    system.cast(kael, 0, { x: 1000, y: 610 }, world);
     simulate(system, world, kael);
 
-    expect(kael.position.x).toBeCloseTo(760 - getHero("kael").radius, 0);
+    expect(kael.position.x).toBeCloseTo(600 - getHero("kael").radius, 0);
     expect(kael.status.motion).toBeNull();
   });
 

@@ -19,6 +19,7 @@ export class MatchController {
   endReason: MatchEndReason | undefined;
   private participants: string[] = [];
   private readonly scores = new Map<string, number>();
+  private readonly deaths = new Map<string, number>();
   private readonly votes = new Set<string>();
   private countdownEndTick = 0;
   private endTick = 0;
@@ -57,12 +58,20 @@ export class MatchController {
     }
   }
 
-  recordKill(killerId: string): MatchTransition | null {
-    if (this.phase !== "playing" || !this.participants.includes(killerId)) return null;
+  recordKill(killerId: string, victimId: string): MatchTransition | null {
+    if (this.phase !== "playing") return null;
+    if (this.participants.includes(victimId)) this.deaths.set(victimId, (this.deaths.get(victimId) ?? 0) + 1);
+    if (!this.participants.includes(killerId)) return null;
     const kills = (this.scores.get(killerId) ?? 0) + 1;
     this.scores.set(killerId, kills);
     if (kills < this.killsToWin) return null;
     this.finish(killerId, "kills");
+    return "ended";
+  }
+
+  recordBaseDestroyed(winnerId: string): MatchTransition | null {
+    if (this.phase !== "playing" || !this.participants.includes(winnerId)) return null;
+    this.finish(winnerId, "base");
     return "ended";
   }
 
@@ -84,7 +93,12 @@ export class MatchController {
   view(tick: number, disconnected: readonly string[]): MatchState {
     const state: MatchState = {
       phase: this.phase,
-      scores: this.participants.map((id) => ({ id, kills: this.scores.get(id) ?? 0 })),
+      scores: this.participants.map((id) => ({
+        id,
+        kills: this.scores.get(id) ?? 0,
+        deaths: this.deaths.get(id) ?? 0,
+        assists: 0,
+      })),
       killsToWin: this.killsToWin,
     };
     if (this.phase === "countdown") state.countdownTicks = Math.max(0, this.countdownEndTick - tick);
@@ -102,6 +116,7 @@ export class MatchController {
     this.phase = "countdown";
     this.participants = [...readyIds];
     this.scores.clear();
+    this.deaths.clear();
     this.votes.clear();
     this.winnerId = null;
     this.endReason = undefined;

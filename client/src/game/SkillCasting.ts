@@ -3,12 +3,14 @@ import { SkillIndicators } from "../render/SkillIndicators.js";
 import { SkillBar } from "../ui/SkillBar.js";
 import type { FrameContext, GameServices } from "./FrameContext.js";
 
-const SLOT_KEYS: Record<string, SkillSlot> = { KeyQ: 0, KeyE: 1, KeyR: 2 };
+const SLOT_KEYS: Record<string, SkillSlot> = { KeyZ: 0, KeyX: 1, KeyC: 2 };
+const RIGHT_BUTTON_SLOT: SkillSlot = 0;
 
 export class SkillCasting {
   private readonly indicators = new SkillIndicators();
   private readonly bar = new SkillBar();
   private aiming: SkillSlot | undefined;
+  private aimingByRightButton = false;
   private caster: Vec2 | undefined;
   private cooldowns: readonly number[] | undefined;
 
@@ -17,7 +19,8 @@ export class SkillCasting {
     window.addEventListener("keydown", (event) => this.onKey(event, true));
     window.addEventListener("keyup", (event) => this.onKey(event, false));
     window.addEventListener("blur", () => this.stopAiming());
-    services.pointer.onLeftClick(() => this.cast());
+    services.pointer.onLeftClick(() => this.castAimed());
+    services.pointer.onRightButton((down) => this.onRightButton(down));
   }
 
   frame(ctx: FrameContext) {
@@ -43,15 +46,33 @@ export class SkillCasting {
     if (slot === undefined || isTyping(event.target)) return;
     event.preventDefault();
     if (down) {
-      if (!event.repeat) this.aiming = slot;
+      if (event.repeat) return;
+      this.aiming = slot;
+      this.aimingByRightButton = false;
     } else if (this.aiming === slot) {
       this.stopAiming();
     }
   }
 
-  private cast() {
-    const slot = this.aiming;
-    if (slot === undefined || !this.caster) return;
+  private onRightButton(down: boolean) {
+    if (down) {
+      this.aiming = RIGHT_BUTTON_SLOT;
+      this.aimingByRightButton = true;
+      return;
+    }
+    if (!this.aimingByRightButton) return;
+    if (this.aiming === RIGHT_BUTTON_SLOT) this.cast(RIGHT_BUTTON_SLOT);
+    this.stopAiming();
+  }
+
+  private castAimed(): boolean {
+    if (this.aiming === undefined) return false;
+    this.cast(this.aiming);
+    return true;
+  }
+
+  private cast(slot: SkillSlot) {
+    if (!this.caster) return;
     if (!this.ready(slot)) {
       this.bar.flashDenied(slot);
       return;
@@ -68,6 +89,7 @@ export class SkillCasting {
 
   private stopAiming() {
     this.aiming = undefined;
+    this.aimingByRightButton = false;
     this.indicators.hide();
     this.bar.setAiming(undefined);
   }

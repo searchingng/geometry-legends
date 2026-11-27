@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { advanceMotion, displace, slowFactor, type GameMap } from "../src/index.js";
+import { advanceMotion, displace, planDash, slowFactor, type GameMap } from "../src/index.js";
 
 const MAP: GameMap = {
   width: 1000,
@@ -35,6 +35,30 @@ describe("forced motion", () => {
   it("never passes through a thin wall even with a large displacement", () => {
     const end = displace({ x: 400, y: 500 }, 1, 0, 400, 10, MAP);
     expect(end.x).toBeLessThanOrEqual(490);
+  });
+
+  it("plans a passing dash through a wall when the landing spot is clear", () => {
+    const motion = planDash({ x: 450, y: 500 }, { x: 1, y: 0 }, 200, 50, "pass", 20, MAP);
+    expect(motion.passWalls).toBe(true);
+    let step = advanceMotion({ x: 450, y: 500 }, motion, 20, MAP);
+    while (step.motion) step = advanceMotion(step.position, step.motion, 20, MAP);
+    expect(step.position.x).toBeCloseTo(650);
+  });
+
+  it("falls back to a blocked dash when the landing spot is inside a wall", () => {
+    const motion = planDash({ x: 450, y: 500 }, { x: 1, y: 0 }, 80, 50, "pass", 20, MAP);
+    expect(motion.passWalls).toBeUndefined();
+    expect(motion.remaining).toBe(80);
+  });
+
+  it("shortens a passing dash at the arena edge", () => {
+    const motion = planDash({ x: 900, y: 500 }, { x: 1, y: 0 }, 200, 50, "pass", 20, MAP);
+    expect(motion.passWalls).toBe(true);
+    expect(motion.remaining).toBeCloseTo(80);
+  });
+
+  it("never lets a blocking dash pass a wall", () => {
+    expect(planDash({ x: 450, y: 500 }, { x: 1, y: 0 }, 200, 50, "block", 20, MAP).passWalls).toBeUndefined();
   });
 
   it("clamps slow percentages", () => {

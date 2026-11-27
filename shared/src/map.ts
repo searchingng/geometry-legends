@@ -15,7 +15,8 @@ export interface GameMap {
   spawns: [Vec2, Vec2];
 }
 
-const WIDTH = 1600;
+const WIDTH = 1800;
+const SPAWN_INSET = 55;
 const HEIGHT = 900;
 
 function withMirror(rects: Rect[]): Rect[] {
@@ -29,7 +30,6 @@ export const ARENA: GameMap = {
   width: WIDTH,
   height: HEIGHT,
   walls: [
-    { x: 760, y: 360, width: 80, height: 180 },
     ...withMirror([
       { x: 420, y: 160, width: 160, height: 40 },
       { x: 420, y: 700, width: 40, height: 120 },
@@ -43,8 +43,8 @@ export const ARENA: GameMap = {
     { x: 560, y: 400, width: 90, height: 120 },
   ]),
   spawns: [
-    { x: 160, y: 450 },
-    { x: 1440, y: 450 },
+    { x: SPAWN_INSET, y: HEIGHT / 2 },
+    { x: WIDTH - SPAWN_INSET, y: HEIGHT / 2 },
   ],
 };
 

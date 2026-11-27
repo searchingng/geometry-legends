@@ -6,11 +6,14 @@ import {
   getHero,
   getSkill,
   normalize,
+  planDash,
   resolveSkillAim,
   segmentObstacleEntry,
+  settleOutOfWalls,
   shapeHits,
   sweepCircle,
   type CombatEvent,
+  type GameMap,
   type ForcedMotion,
   type HeroId,
   type SkillDefinition,
@@ -50,9 +53,17 @@ export interface DamageResult {
   absorbed: number;
 }
 
+export interface CreepTarget {
+  id: string;
+  position: Vec2;
+  radius: number;
+}
+
 export interface SkillWorld<A extends SkillActor> {
   readonly tick: number;
   readonly actors: readonly A[];
+  creepsHostileTo?(caster: A): readonly CreepTarget[];
+  damageCreep?(creepId: string, amount: number, source: A): number;
   isAlive(actor: A): boolean;
   damage(target: A, amount: number, source: A): DamageResult;
   reveal(targetId: string, viewerId: string, ticks: number): void;
@@ -104,8 +115,8 @@ interface Dash<A> {
 
 const KNOCKBACK_SPEED = 1300;
 const CONTACT_MARGIN = 10;
-const PROJECTILE_WALL_INFLATE = 4;
 const DEFAULT_PROJECTILE_RADIUS = 15;
+const OPEN_ARENA: GameMap = { ...ARENA, walls: [] };
 
 export class SkillSystem<A extends SkillActor> {
   private nextId = 1;
@@ -140,7 +151,8 @@ export class SkillSystem<A extends SkillActor> {
       this.launch(caster, skillId, skill, direction, delivery.speed);
     } else if (delivery.type === "dash") {
       const distance = skill.aim === "direction" ? delivery.distance : Math.min(delivery.distance, distanceBetween(caster.position, point));
-      this.startDash(caster, skillId, direction, distance, delivery.speed);
+      const radius = getHero(caster.heroId).radius;
+      this.startDash(caster, skillId, direction, planDash(caster.position, direction, distance, delivery.speed * TICK_DT, delivery.wallMode, radius, ARENA));
     } else {
       skill.zones.forEach((zone, index) => {
         const origin = zone.anchor === "aimPoint" ? point : caster.position;
@@ -228,9 +240,9 @@ export class SkillSystem<A extends SkillActor> {
     });
   }
 
-  private startDash(caster: A, skillId: SkillId, direction: Vec2, distance: number, speed: number) {
-    if (distance <= 0) return;
-    setMotion(caster.status, { dirX: direction.x, dirY: direction.y, step: speed * TICK_DT, remaining: distance }, "dash");
+  private startDash(caster: A, skillId: SkillId, direction: Vec2, motion: ForcedMotion) {
+    if (motion.remaining <= 0) return;
+    setMotion(caster.status, motion, "dash");
     this.dashes.set(caster.id, { caster, skillId, start: { ...caster.position }, direction, swept: new Set() });
   }
 
@@ -266,6 +278,17 @@ export class SkillSystem<A extends SkillActor> {
         this.applyEffects(caster, target, skillId, zone, origin, direction, world);
       }
     }
+    for (const creep of creepsOf(caster, world)) {
+      if (shapeHits(zone.shape, origin, direction, creep.position, creep.radius)) this.hitCreep(caster, creep, skillId, zone, world);
+    }
+  }
+
+  private hitCreep(caster: A, creep: CreepTarget, skillId: SkillId, zone: SkillZone, world: SkillWorld<A>) {
+    let damage = 0;
+    for (const effect of zone.effects) {
+      if (effect.type === "damage") damage += world.damageCreep?.(creep.id, effect.amount, caster) ?? 0;
+    }
+    if (damage > 0) world.emit({ kind: "skillHit", casterId: caster.id, targetId: creep.id, skillId, damage, absorbed: 0, healed: 0 });
   }
 
   private applyEffects(caster: A, target: A, skillId: SkillId, zone: SkillZone, origin: Vec2, direction: Vec2, world: SkillWorld<A>) {
@@ -286,11 +309,14 @@ export class SkillSystem<A extends SkillActor> {
           absorbed += result.absorbed;
           break;
         }
-        case "stun":
+        case "stun": {
+          const passing = target.status.motion?.passWalls === true;
           applyStun(target.status, msToTicks(effect.durationMs), tick);
           if (target.status.motion === null) this.dashes.delete(target.id);
+          if (passing && target.status.motion === null) settle(target);
           applied("stun", { durationTicks: msToTicks(effect.durationMs) });
           break;
+        }
         case "slow":
           applySlow(target.status, effect.percent, msToTicks(effect.durationMs), tick);
           applied("slow", { durationTicks: msToTicks(effect.durationMs), percent: effect.percent });
@@ -323,6 +349,7 @@ export class SkillSystem<A extends SkillActor> {
     const away = normalize(target.position.x - origin.x, target.position.y - origin.y);
     const push = away.x === 0 && away.y === 0 ? direction : away;
     this.dashes.delete(target.id);
+    if (target.status.motion?.passWalls) settle(target);
     setMotion(
       target.status,
       { dirX: push.x, dirY: push.y, step: KNOCKBACK_SPEED * TICK_DT, remaining: distance },
@@ -343,6 +370,7 @@ export class SkillSystem<A extends SkillActor> {
       const result = advanceMotion(before, limited, getHero(actor.heroId).radius, ARENA);
       actor.position = result.position;
       setMotion(actor.status, contactT === null ? result.motion : null, actor.status.motionKind);
+      if (contactT !== null && motion.passWalls) settle(actor);
 
       if (!dash) continue;
       this.sweepDash(dash, before, actor.position, world);
@@ -376,6 +404,12 @@ export class SkillSystem<A extends SkillActor> {
         if (distanceToSegment(target.position, from, to) > reach + getHero(target.heroId).radius) continue;
         dash.swept.add(key);
         this.applyEffects(dash.caster, target, dash.skillId, zone, dash.start, dash.direction, world);
+      }
+      for (const creep of creepsOf(dash.caster, world)) {
+        const key = `${index}:${creep.id}`;
+        if (dash.swept.has(key) || distanceToSegment(creep.position, from, to) > reach + creep.radius) continue;
+        dash.swept.add(key);
+        this.hitCreep(dash.caster, creep, dash.skillId, zone, world);
       }
     });
   }
@@ -426,9 +460,23 @@ export class SkillSystem<A extends SkillActor> {
         hitTarget = enemy;
       }
     }
-    const wallT = segmentObstacleEntry(from, to, ARENA, PROJECTILE_WALL_INFLATE) ?? Infinity;
+    let hitCreep: CreepTarget | undefined;
+    for (const creep of creepsOf(projectile.caster, world)) {
+      const t = sweepCircle(from, to, creep.position, projectile.hitRadius + creep.radius);
+      if (t !== null && t < hitT) {
+        hitT = t;
+        hitCreep = creep;
+        hitTarget = undefined;
+      }
+    }
+    const boundsT = segmentObstacleEntry(from, to, OPEN_ARENA) ?? Infinity;
 
-    if (hitTarget && hitT <= wallT) {
+    if (hitCreep && hitT <= boundsT) {
+      this.endProjectile(projectile, lerpPoint(from, to, hitT), world, hitCreep.id);
+      for (const zone of getSkill(projectile.skillId).zones) this.hitCreep(projectile.caster, hitCreep, projectile.skillId, zone, world);
+      return false;
+    }
+    if (hitTarget && hitT <= boundsT) {
       const at = lerpPoint(from, to, hitT);
       this.endProjectile(projectile, at, world, hitTarget.id);
       for (const zone of getSkill(projectile.skillId).zones) {
@@ -436,8 +484,8 @@ export class SkillSystem<A extends SkillActor> {
       }
       return false;
     }
-    if (wallT !== Infinity) {
-      this.endProjectile(projectile, lerpPoint(from, to, wallT), world);
+    if (boundsT !== Infinity) {
+      this.endProjectile(projectile, lerpPoint(from, to, boundsT), world);
       return false;
     }
 
@@ -483,6 +531,10 @@ export function dealDamage(target: SkillActor, amount: number, tick: number): Da
   return { dealt, absorbed };
 }
 
+function creepsOf<A extends SkillActor>(caster: A, world: SkillWorld<A>): readonly CreepTarget[] {
+  return world.creepsHostileTo?.(caster) ?? [];
+}
+
 function zoneOf(zone: { skillId: SkillId; zoneIndex: number }): SkillZone {
   return getSkill(zone.skillId).zones[zone.zoneIndex];
 }
@@ -493,4 +545,8 @@ function distanceBetween(a: Vec2, b: Vec2): number {
 
 function lerpPoint(from: Vec2, to: Vec2, t: number): Vec2 {
   return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t };
+}
+
+function settle(actor: SkillActor) {
+  actor.position = settleOutOfWalls(actor.position, getHero(actor.heroId).radius, ARENA);
 }

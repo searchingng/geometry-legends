@@ -31,7 +31,9 @@ export class AttackTargeting {
     if (!ctx.myHeroId) return;
     const { keyboard, pointer } = this.services;
     const aim = pointer.worldPoint();
-    this.syncAttack(keyboard.consumeAttackTap(), keyboard.attackHeld(), aim, ctx.now);
+    const tapped = keyboard.consumeAttackTap() || pointer.consumeLeftClick();
+    const held = keyboard.attackHeld() || pointer.leftHeld();
+    this.syncAttack(tapped, held, aim, ctx.now);
 
     if (ctx.dead || !ctx.myPosition) {
       this.view.hide();
@@ -47,6 +49,7 @@ export class AttackTargeting {
     for (const enemy of ctx.enemies) {
       this.candidates.push({ id: enemy.id, position: enemy.position, radius: getHero(enemy.heroId).radius });
     }
+    this.candidates.push(...ctx.unitTargets);
 
     const aimInside = aim !== undefined && isAimInsideAttackRange(this.attacker, aim);
     this.view.showRange(ctx.myPosition, hero.attackRange + hero.radius, this.heldSent, aimInside);

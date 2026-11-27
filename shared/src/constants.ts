@@ -11,7 +11,7 @@ export const MAX_QUEUED_INPUTS = 30;
 
 export const RESPAWN_MS = 5000;
 
-export const KILLS_TO_WIN = 5;
+export const KILLS_TO_WIN = 3;
 export const MATCH_DURATION_MS = 10 * 60 * 1000;
 export const MATCH_COUNTDOWN_MS = 3000;
 export const SPAWN_PROTECTION_MS = 2000;

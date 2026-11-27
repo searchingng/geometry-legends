@@ -3,6 +3,7 @@ import {
   INTERPOLATION_DELAY_MS,
   Message,
   TICK_MS,
+  UNIT_STATS,
   bushIndexAt,
   getHero,
   getSkill,
@@ -12,8 +13,11 @@ import {
   type PickHeroMessage,
   type SkillSlot,
   type SnapshotMessage,
+  type TargetCandidate,
+  type Team,
   type Vec2,
   type VisiblePlayer,
+  type VisibleUnit,
 } from "@moba/shared";
 import type { Connection } from "../net/Connection.js";
 import type { Keyboard } from "../input/keyboard.js";
@@ -24,6 +28,7 @@ import { createArenaView, type ArenaView } from "../render/ArenaView.js";
 import { VisionFog } from "../render/VisionFog.js";
 import { AttackEffects, type PositionLookup } from "../render/AttackEffects.js";
 import { SkillEffects } from "../render/SkillEffects.js";
+import { UnitViews } from "../render/UnitViews.js";
 import { AttackTargeting } from "./AttackTargeting.js";
 import { SkillCasting } from "./SkillCasting.js";
 import type { FrameContext, GameServices, VisibleEnemy } from "./FrameContext.js";
@@ -31,8 +36,11 @@ import { LocalPredictor } from "./LocalPredictor.js";
 import { SnapshotBuffer } from "./SnapshotBuffer.js";
 import type { Hud } from "../ui/Hud.js";
 import { CombatFeedback } from "../ui/CombatFeedback.js";
-import { Minimap } from "../ui/Minimap.js";
+import { GameInfo } from "../ui/GameInfo.js";
+import { HeroInfoButton } from "../ui/HeroInfoButton.js";
+import { Minimap, type MinimapUnit } from "../ui/Minimap.js";
 import { MatchHud } from "../ui/MatchHud.js";
+import { QuitButton } from "../ui/QuitButton.js";
 import { SpectatorHud } from "../ui/SpectatorHud.js";
 import { SpectatorCamera } from "./SpectatorCamera.js";
 
@@ -42,6 +50,8 @@ const HUD_UPDATE_MS = 250;
 const MIN_BOLT_RANGE = 150;
 const IDLE_DIRECTION = { x: 0, y: 0 };
 const SEAT_COLORS = ["#5dffa0", "#ff5a5a"];
+const UNIT_ALLY_COLOR = 0x5dffa0;
+const UNIT_ENEMY_COLOR = 0xff5a5a;
 
 export class Game {
   private readonly views = new Map<string, HeroView>();
@@ -51,16 +61,25 @@ export class Game {
   private readonly minimap = new Minimap(ARENA);
   private readonly effects = new AttackEffects();
   private readonly skillEffects = new SkillEffects();
+  private readonly unitViews = new UnitViews();
   private readonly heroIds = new Map<string, HeroId>();
   private readonly viewPosition: PositionLookup = (id) => {
     const view = this.views.get(id);
-    return view?.root.visible ? { x: view.root.position.x, y: view.root.position.z } : undefined;
+    if (!view) return this.unitViews.position(id);
+    return view.root.visible ? { x: view.root.position.x, y: view.root.position.z } : undefined;
   };
+  private readonly isAllyTeam = (team: Team) => (this.spectating ? team === 0 : team === this.myTeam);
+  private myTeam: Team | undefined;
+  private units: readonly VisibleUnit[] = [];
   private readonly services: GameServices;
   private readonly attackTargeting: AttackTargeting;
   private readonly skillCasting: SkillCasting;
   private readonly combatFeedback: CombatFeedback;
   private readonly matchHud: MatchHud;
+  private readonly gameInfo = new GameInfo();
+  private readonly heroInfoButton = new HeroInfoButton();
+  private readonly isAllySide = (playerId: string) =>
+    this.spectating ? this.seatIds.indexOf(playerId) === 0 : playerId === this.connection.sessionId;
   private matchPhase: MatchPhase | undefined;
   private spectating = false;
   private spectatorHud: SpectatorHud | undefined;
@@ -99,6 +118,10 @@ export class Game {
       () => connection.send(Message.Rematch, {}),
       () => void this.backToMenu(),
     );
+    new QuitButton(
+      () => void this.backToMenu(),
+      () => !this.spectating && (this.matchPhase === "countdown" || this.matchPhase === "playing"),
+    );
     this.spectatorCamera = new SpectatorCamera(scene, keyboard, ARENA);
     connection.onStatus((status) => {
       if (status === "connected") this.resyncPending = true;
@@ -108,6 +131,7 @@ export class Game {
     scene.add(this.arena.root);
     scene.add(this.effects.root);
     scene.add(this.skillEffects.root);
+    scene.add(this.unitViews.root);
 
     connection.on<SnapshotMessage>(Message.Snapshot, (snapshot) => this.onSnapshot(snapshot));
     connection.on<number>(Message.Pong, (sentAt) => (this.pingMs = performance.now() - sentAt));
@@ -138,6 +162,9 @@ export class Game {
     this.seatIds = snapshot.roster.map((entry) => entry.id);
     this.snapshots.push(snapshot, performance.now());
     this.syncViews(snapshot);
+    this.myTeam = snapshot.roster.find((entry) => entry.id === this.connection.sessionId)?.team;
+    this.units = snapshot.units ?? [];
+    if (this.spectating || this.myTeam !== undefined) this.unitViews.sync(this.units, this.isAllyTeam);
 
     this.syncHealth(snapshot.visible);
     for (const event of snapshot.events ?? []) this.onCombatEvent(event);
@@ -158,6 +185,7 @@ export class Game {
         return heroId ? getHero(heroId).name : "";
       },
     });
+    this.gameInfo.update(snapshot.match, snapshot.roster, this.isAllySide);
     const previousPhase = this.matchPhase;
     this.matchPhase = snapshot.match?.phase;
     const matchRestarted = this.matchPhase === "countdown" && previousPhase !== "countdown";
@@ -175,6 +203,7 @@ export class Game {
     const position = { x: me.x, y: me.y };
     if (!this.predictor) {
       this.myHeroId = myEntry.heroId;
+      this.heroInfoButton.setHero(myEntry.heroId);
       this.predictor = new LocalPredictor(position, getHero(myEntry.heroId));
       this.visionFog.setRadius(getHero(myEntry.heroId).visionRange);
     } else if (me.hp === 0) {
@@ -203,15 +232,37 @@ export class Game {
   }
 
   private onCombatEvent(event: CombatEvent) {
-    if (event.kind === "skillHit" && event.damage > 0) this.views.get(event.targetId)?.flash();
+    if (event.kind === "skillHit" && event.damage > 0) this.flash(event.targetId);
     if (event.kind !== "hit") return;
     const heroId = this.heroIds.get(event.attackerId);
-    if (!heroId) return;
+    if (heroId) {
+      const hero = getHero(heroId);
+      const style = hero.attackRange >= MIN_BOLT_RANGE ? "bolt" : "slash";
+      this.effects.spawn(style, event.attackerId, event.targetId, hero.visual.color, this.viewPosition);
+    } else {
+      const unit = this.units.find((candidate) => candidate.id === event.attackerId);
+      if (!unit) return;
+      const color = this.isAllyTeam(unit.team) ? UNIT_ALLY_COLOR : UNIT_ENEMY_COLOR;
+      this.effects.spawn(unit.kind === "turret" || unit.kind === "base" ? "bolt" : "slash", event.attackerId, event.targetId, color, this.viewPosition);
+    }
+    this.flash(event.targetId);
+    this.alertStructureRange(event.attackerId, event.targetId);
+  }
 
-    const hero = getHero(heroId);
-    const style = hero.attackRange >= MIN_BOLT_RANGE ? "bolt" : "slash";
-    this.effects.spawn(style, event.attackerId, event.targetId, hero.visual.color, this.viewPosition);
-    this.views.get(event.targetId)?.flash();
+  private alertStructureRange(attackerId: string, targetId: string) {
+    if (this.isStructure(targetId)) this.unitViews.alertRange(targetId);
+    if (this.isStructure(attackerId) && this.heroIds.has(targetId)) this.unitViews.alertRange(attackerId);
+  }
+
+  private isStructure(id: string): boolean {
+    const kind = this.units.find((unit) => unit.id === id)?.kind;
+    return kind === "turret" || kind === "base";
+  }
+
+  private flash(targetId: string) {
+    const view = this.views.get(targetId);
+    if (view) view.flash();
+    else this.unitViews.flash(targetId);
   }
 
   private syncViews(snapshot: SnapshotMessage) {
@@ -227,8 +278,7 @@ export class Game {
     for (const entry of snapshot.roster) {
       this.heroIds.set(entry.id, entry.heroId);
       if (this.views.has(entry.id)) continue;
-      const isAllySide = this.spectating ? this.seatIds.indexOf(entry.id) === 0 : entry.id === this.connection.sessionId;
-      const view = this.heroRenderer.create(getHero(entry.heroId), isAllySide, entry.name);
+      const view = this.heroRenderer.create(getHero(entry.heroId), this.isAllySide(entry.id), entry.name);
       view.setVisible(false);
       this.views.set(entry.id, view);
       this.scene.add(view.root);
@@ -262,6 +312,10 @@ export class Game {
       }
     }
 
+    for (const id of this.unitViews.ids()) {
+      this.unitViews.update(id, this.snapshots.positionAt(id, now, INTERPOLATION_DELAY_MS), frameMs);
+    }
+
     const ctx: FrameContext = {
       now,
       frameMs,
@@ -273,6 +327,7 @@ export class Game {
       spectating: this.spectating,
       inputLocked: this.inputLocked || this.spectating,
       enemies,
+      unitTargets: this.unitTargets(),
       viewPosition: this.viewPosition,
     };
     if (this.spectating) {
@@ -304,8 +359,28 @@ export class Game {
       myPosition: ctx.myPosition,
       hiddenInBush: bush !== -1,
       enemies: ctx.enemies,
+      units: this.minimapUnits(),
       visibleArea: ctx.dead ? undefined : this.visionFog.visibleArea(),
     });
+  }
+
+  private unitTargets(): TargetCandidate[] {
+    const targets: TargetCandidate[] = [];
+    for (const unit of this.units) {
+      if (this.isAllyTeam(unit.team)) continue;
+      if (unit.kind === "base" && this.units.some((other) => other.kind === "turret" && other.team === unit.team)) continue;
+      const position = this.unitViews.position(unit.id);
+      if (position) targets.push({ id: unit.id, position, radius: UNIT_STATS[unit.kind].radius });
+    }
+    return targets;
+  }
+
+  private minimapUnits(): MinimapUnit[] {
+    return this.units.map((unit) => ({
+      position: unit,
+      ally: this.isAllyTeam(unit.team),
+      structure: unit.kind === "base" || unit.kind === "turret",
+    }));
   }
 
   private enterSpectatorMode() {
@@ -332,6 +407,7 @@ export class Game {
         color: this.seatColor(player.id),
         hiddenInBush: bushIndexAt(ARENA, player.position) !== -1,
       })),
+      units: this.minimapUnits(),
       visibleArea: undefined,
       fullView: true,
     });
@@ -418,6 +494,6 @@ export class Game {
     if (this.connection.connectionStatus !== "connected") return `${you} Connection lost — reconnecting…`;
     if (this.matchPhase === "countdown") return `${you} Get ready…`;
     if (this.matchPhase === "ended") return `${you} Match over.`;
-    return `${you} WASD move · Space/J attack · hold Q/E/R + left click to cast.`;
+    return `${you} WASD move · Space / left click attack · hold Z/X/C + left click to cast · hold right click to aim skill 1, release to cast · hold Tab for game info.`;
   }
 }

@@ -1,0 +1,130 @@
+.game-info {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 8;
+  width: min(440px, calc(100vw - 32px));
+  padding: 16px 18px 14px;
+  border: 1px solid rgba(120, 140, 200, 0.35);
+  border-radius: 12px;
+  background: rgba(4, 6, 12, 0.88);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.55);
+  font: 600 14px/1.2 ui-monospace, "Cascadia Code", Consolas, monospace;
+  color: #dfe6ff;
+  pointer-events: none;
+  user-select: none;
+}
+
+.game-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.game-info-title {
+  margin: 0;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.85;
+}
+
+.game-info-timer {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 13px;
+}
+
+.game-info-scoreline {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  margin-top: 12px;
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.game-info-score-ally {
+  color: #5dffa0;
+}
+
+.game-info-score-enemy {
+  color: #ff5a5a;
+}
+
+.game-info-separator {
+  opacity: 0.5;
+}
+
+.game-info-goal {
+  margin: 4px 0 12px;
+  font-size: 12px;
+  text-align: center;
+  opacity: 0.6;
+}
+
+.game-info-row {
+  display: grid;
+  grid-template-columns: 14px 1fr 34px 34px 34px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+}
+
+.game-info-columns {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.game-info-team {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.game-info-team .game-info-row {
+  border-left: 3px solid;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.game-info-team-ally .game-info-row {
+  border-left-color: #5dffa0;
+}
+
+.game-info-team-enemy .game-info-row {
+  border-left-color: #ff5a5a;
+}
+
+.game-info-icon {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.game-info-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.game-info-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.game-info-hero {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.game-info-stat {
+  text-align: center;
+  font-size: 15px;
+}

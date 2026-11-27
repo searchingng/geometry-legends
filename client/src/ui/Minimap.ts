@@ -16,15 +16,26 @@ const COLORS = {
   vision: "rgba(255, 255, 255, 0.07)",
   me: "#5dffa0",
   enemy: "#ff5a5a",
+  allyUnit: "#3fbf80",
+  enemyUnit: "#d04848",
 };
+const STRUCTURE_PX = 7;
+const CREEP_PX = 2.5;
 
 export interface MinimapFrame {
   now: number;
   myPosition: Vec2 | undefined;
   hiddenInBush: boolean;
   enemies: readonly MinimapMarker[];
+  units?: readonly MinimapUnit[];
   visibleArea: VisibleArea | undefined;
   fullView?: boolean;
+}
+
+export interface MinimapUnit {
+  position: Vec2;
+  ally: boolean;
+  structure: boolean;
 }
 
 export interface MinimapMarker {
@@ -96,6 +107,7 @@ export class Minimap {
     if (frame.visibleArea) this.drawVisibleArea(frame.visibleArea);
 
     context.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+    for (const unit of frame.units ?? []) this.drawUnit(unit);
     for (const enemy of frame.enemies) {
       const color = enemy.color ?? COLORS.enemy;
       this.drawDot(enemy.position, color);
@@ -126,6 +138,13 @@ export class Minimap {
     context.fillStyle = COLORS.vision;
     context.fillRect(0, 0, this.canvas.width, this.canvas.height);
     context.restore();
+  }
+
+  private drawUnit({ position, ally, structure }: MinimapUnit) {
+    const context = this.context;
+    const size = (structure ? STRUCTURE_PX : CREEP_PX) / this.cssScale;
+    context.fillStyle = ally ? COLORS.allyUnit : COLORS.enemyUnit;
+    context.fillRect(position.x - size / 2, position.y - size / 2, size, size);
   }
 
   private drawDot(position: Vec2, color: string) {

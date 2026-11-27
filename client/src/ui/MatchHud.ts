@@ -177,12 +177,14 @@ export class MatchHud {
 function reasonText(match: MatchState, outcome: string): string {
   if (match.endReason === "forfeit") return outcome === "victory" ? "Your opponent left the match." : "You left the match.";
   if (match.endReason === "time") return outcome === "draw" ? "Time is up — scores are tied." : "Time is up.";
+  if (match.endReason === "base") return outcome === "victory" ? "You destroyed the enemy base." : "Your base was destroyed.";
   return `First to ${match.killsToWin} kills.`;
 }
 
 function spectatorReasonText(match: MatchState): string {
   if (match.endReason === "forfeit") return "A player left the match.";
   if (match.endReason === "time") return match.winnerId ? "Time is up." : "Time is up — scores are tied.";
+  if (match.endReason === "base") return "The base was destroyed.";
   return `First to ${match.killsToWin} kills.`;
 }
 

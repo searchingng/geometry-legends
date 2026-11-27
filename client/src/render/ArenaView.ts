@@ -11,9 +11,10 @@ import {
   MeshBasicMaterial,
   MeshLambertMaterial,
   PlaneGeometry,
+  RingGeometry,
 } from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import type { GameMap, Rect } from "@moba/shared";
+import { FOUNTAIN_RADIUS, type GameMap, type Rect } from "@moba/shared";
 import { BushView } from "./BushView.js";
 import type { VisionFog } from "./VisionFog.js";
 
@@ -24,6 +25,8 @@ const BORDER_THICKNESS = 12;
 const NEON_BLUE = 0x6f86ff;
 const SHADOW_SHIFT_PER_HEIGHT = { x: 0.42, z: -0.33 };
 const WALL_LOS_BIAS = 28;
+const FOUNTAIN_COLOR = 0x7dffc8;
+const FOUNTAIN_RING_WIDTH = 4;
 
 interface Block {
   rect: Rect;
@@ -41,7 +44,7 @@ export function createArenaView(map: GameMap, visionFog: VisionFog): ArenaView {
     ...borderRects(map).map((rect) => ({ rect, height: BORDER_HEIGHT })),
   ];
 
-  const ground = [createFloor(map), createGrid(map), createFakeShadows(blocks)];
+  const ground = [createFloor(map), createGrid(map), createFakeShadows(blocks), ...createFountains(map)];
   const walls = createBlocks(blocks);
   for (const object of ground) visionFog.apply(object.material as Material);
   for (const object of walls) visionFog.apply(object.material as Material, WALL_LOS_BIAS);
@@ -107,6 +110,19 @@ function createFakeShadows(blocks: Block[]): Mesh {
   );
   for (const plane of planes) plane.dispose();
   return shadows;
+}
+
+function createFountains(map: GameMap): Mesh[] {
+  const disc = new MeshBasicMaterial({ color: FOUNTAIN_COLOR, transparent: true, opacity: 0.08, depthWrite: false });
+  const ring = new MeshBasicMaterial({ color: FOUNTAIN_COLOR, transparent: true, opacity: 0.5, depthWrite: false });
+  const discGeometry = new RingGeometry(0, FOUNTAIN_RADIUS, 48).rotateX(-Math.PI / 2);
+  const ringGeometry = new RingGeometry(FOUNTAIN_RADIUS - FOUNTAIN_RING_WIDTH, FOUNTAIN_RADIUS, 48).rotateX(-Math.PI / 2);
+  return map.spawns.flatMap((spawn) =>
+    [new Mesh(discGeometry, disc), new Mesh(ringGeometry, ring)].map((mesh) => {
+      mesh.position.set(spawn.x, 0.6, spawn.y);
+      return mesh;
+    }),
+  );
 }
 
 function borderRects(map: GameMap): Rect[] {

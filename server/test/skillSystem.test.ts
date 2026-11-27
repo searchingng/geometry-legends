@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { getHero, type CombatEvent, type HeroId, type SkillSlot, type Vec2 } from "@moba/shared";
+import { ARENA, getHero, type CombatEvent, type HeroId, type SkillSlot, type Vec2 } from "@moba/shared";
 import { createStatus, isStunned, moveSpeedFactor } from "../src/skills/CombatStatus.js";
 import { SkillSystem, dealDamage, type SkillActor, type SkillWorld } from "../src/skills/SkillSystem.js";
 
@@ -213,15 +213,73 @@ describe("SkillSystem", () => {
     expect(blade.status.motion).toBeNull();
   });
 
-  it("projectiles stop at walls", () => {
-    const nova = actor("nova", "nova", 300, 450);
+  it("projectiles fly through walls", () => {
+    const nova = actor("nova", "nova", 400, 450);
     const blade = actor("blade", "blade", 950, 450);
     const world = new TestWorld([nova, blade]);
 
     cast(system, world, nova, 0, blade.position);
     run(system, world, 25);
-    expect(blade.hp).toBe(getHero("blade").maxHp);
+    expect(blade.hp).toBe(getHero("blade").maxHp - 130);
+  });
+
+  it("projectiles end at the arena edge", () => {
+    const nova = actor("nova", "nova", ARENA.width - 200, 100);
+    const world = new TestWorld([nova]);
+
+    cast(system, world, nova, 0, { x: ARENA.width, y: 100 });
+    run(system, world, 25);
     const end = world.events.find((event) => event.kind === "projectileEnd");
-    expect(end?.kind === "projectileEnd" && end.x).toBeLessThan(760);
+    expect(end?.kind === "projectileEnd" && end.x).toBeCloseTo(ARENA.width);
+  });
+
+  it("a passing dash crosses a wall when its range reaches the far side", () => {
+    const blade = actor("blade", "blade", 650, 450);
+    const world = new TestWorld([blade]);
+
+    cast(system, world, blade, 0, { x: 1000, y: 450 });
+    run(system, world, 15);
+    expect(blade.position.x).toBeCloseTo(870);
+    expect(blade.status.motion).toBeNull();
+  });
+
+  it("a passing dash stops at the wall when it would land inside it", () => {
+    const blade = actor("blade", "blade", 400, 610);
+    const world = new TestWorld([blade]);
+
+    cast(system, world, blade, 0, { x: 1000, y: 610 });
+    run(system, world, 15);
+    expect(blade.position.x).toBeCloseTo(600 - getHero("blade").radius, 0);
+    expect(blade.status.motion).toBeNull();
+  });
+
+  it("a passing dash that ends inside a wall is pushed out of it", () => {
+    const blade = actor("blade", "blade", 490, 610);
+    const world = new TestWorld([blade]);
+
+    cast(system, world, blade, 0, { x: 1000, y: 610 });
+    while (blade.position.x < 620) run(system, world, 1);
+    blade.status.motion = { ...blade.status.motion!, remaining: 0.001 };
+    run(system, world, 1);
+    expect(blade.position.x < 600 - 21 || blade.position.x > 660 + 21).toBe(true);
+  });
+
+  it("projectiles stop on the first creep and damage it", () => {
+    const nova = actor("nova", "nova", 200, 300);
+    const enemy = actor("enemy", "blade", 500, 300);
+    const creepDamage: number[] = [];
+    const world = Object.assign(new TestWorld([nova, enemy]), {
+      creepsHostileTo: () => [{ id: "c1", position: { x: 350, y: 300 }, radius: 13 }],
+      damageCreep: (_id: string, amount: number) => {
+        creepDamage.push(amount);
+        return amount;
+      },
+    });
+
+    cast(system, world, nova, 0, { x: 600, y: 300 });
+    run(system, world, 30);
+    expect(creepDamage.length).toBe(1);
+    expect(enemy.hp).toBe(getHero("blade").maxHp);
+    expect(world.events.some((event) => event.kind === "skillHit" && event.targetId === "c1")).toBe(true);
   });
 });

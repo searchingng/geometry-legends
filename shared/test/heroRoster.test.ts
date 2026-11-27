@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HERO_IDS, getHero } from "../src/heroes.js";
+import { HERO_IDS, HERO_ROLES, getHero } from "../src/heroes.js";
 import { SKILLS } from "../src/skills.js";
 
 const AIMS = ["direction", "point", "none"];
@@ -15,6 +15,16 @@ describe("hero roster", () => {
     expect(HERO_IDS).toHaveLength(10);
     expect(new Set(HERO_IDS.map((id) => getHero(id).visual.shape)).size).toBe(10);
     expect(new Set(HERO_IDS.map((id) => getHero(id).visual.color)).size).toBe(10);
+  });
+
+  it("gives every hero one or two distinct main roles", () => {
+    for (const id of HERO_IDS) {
+      const roles = getHero(id).roles;
+      expect(roles.length).toBeGreaterThanOrEqual(1);
+      expect(roles.length).toBeLessThanOrEqual(2);
+      expect(new Set(roles).size).toBe(roles.length);
+      for (const role of roles) expect(HERO_ROLES).toContain(role);
+    }
   });
 
   it("references only existing skills, none shared between heroes", () => {

@@ -3,6 +3,7 @@ import {
   TICK_DT,
   advanceMotion,
   lerp,
+  planDash,
   resolveSkillAim,
   slowFactor,
   stepMovement,
@@ -71,7 +72,7 @@ export class LocalPredictor {
     const distance = skill.aim === "direction" ? delivery.distance : Math.min(delivery.distance, reach);
     if (distance <= 0) return;
 
-    const motion = { dirX: direction.x, dirY: direction.y, step: delivery.speed * TICK_DT, remaining: distance };
+    const motion = planDash(this.current, direction, distance, delivery.speed * TICK_DT, delivery.wallMode, this.stats.radius, ARENA);
     this.localDash = { startSeq: this.nextSeq, motion };
     this.motion = motion;
   }

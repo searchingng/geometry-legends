@@ -1,6 +1,6 @@
 # moba2d
 
-Browser 1v1 MOBA. Authoritative Colyseus server, Three.js client with a fixed tilted camera, game logic is pure 2D in `shared/`. 10 geometric heroes, 3 skills each (Q/E/R), fog of war, bushes, spectators.
+Browser 1v1 MOBA. Authoritative Colyseus server, Three.js client with a fixed tilted camera, game logic is pure 2D in `shared/`. One lane with a base + turret per side and creep waves; win by 3 kills or destroying the enemy base. 10 geometric heroes, 3 skills each (Z/X/C: hold to aim + left click to cast, hold right click aims skill 1, release casts; Space / left click attack), fog of war, bushes, spectators.
 
 User writes in Uzbek: answer in Uzbek. Discuss the approach first, code after an explicit go-ahead. Do not commit unless asked.
 
@@ -32,9 +32,11 @@ npm workspaces: `shared` (`@moba/shared`, imported by both sides), `server`, `cl
 | `protocol.ts` | `Message` names, client→server message guards, `SnapshotMessage`, events, `RoomSummary`, `JoinOptions` |
 | `movement.ts` | `stepMovement` (used by server and client prediction) |
 | `map.ts` | `ARENA`: size, obstacles, bushes |
+| `lane.ts` | `Team`, unit kinds + `UNIT_STATS` (base, turret, creeps), `STRUCTURES` positions, creep wave timing/pack, lane helpers |
 | `vision.ts` | line of sight, bush hiding, visibility rays |
 | `targeting.ts` / `combat.ts` | basic attack target choice and range |
 | `roomCode.ts` | room code alphabet/validation |
+| `heroInfo.ts` | `heroStatLines`, `describeSkill`: hero/skill data → display text for the hero info panel |
 | `username.ts` | `normalizeUsername`, user key format, identity API types, name error messages |
 | `admin.ts` | admin API path and response types (`AdminUser`, `AdminMatch`, `AdminPage`) |
 
@@ -47,6 +49,7 @@ npm workspaces: `shared` (`@moba/shared`, imported by both sides), `server`, `cl
 | `skills/SkillSystem.ts` | casting, projectiles, zones, damage (`dealDamage`) |
 | `skills/CombatStatus.ts` | stun, slow, shield, spawn protection, forced motion |
 | `VisionSystem.ts` | who sees whom each tick (fog of war) |
+| `units/UnitSystem.ts` | base, turret, creep waves: spawn, lane march, target choice, attacks, call-for-help aggro, team vision, base-destroyed callback |
 | `roomList.ts` / `roomCode.ts` | lobby room list API, room code allocation |
 | `db/database.ts` | SQLite (`node:sqlite`) schema: `users` (username = ID, key hash), `user_ips`, `counters`, `matches`, `match_players` |
 | `db/UserStore.ts` / `db/MatchHistory.ts` / `db/AdminQueries.ts` | name claim + IP log, match writes, admin lists (search, paging) |
@@ -62,8 +65,8 @@ npm workspaces: `shared` (`@moba/shared`, imported by both sides), `server`, `cl
 | network | `net/Connection.ts` (join/create/reconnect/leave, rooms API URL) |
 | game loop | `game/Game.ts` (snapshot handling, frame loop, HUD sync, spectator mode), `FrameContext.ts`, `SnapshotBuffer.ts` (interpolation), `LocalPredictor.ts` (own-hero prediction), `SkillCasting.ts`, `AttackTargeting.ts`, `SpectatorCamera.ts` |
 | input | `input/keyboard.ts`, `input/Pointer.ts` |
-| render (Three.js) | `SceneRenderer.ts` (camera, scene), `ArenaView.ts`, `BushView.ts`, `VisionFog.ts`, `MeshHeroRenderer.ts` + `HeroShapes.ts` (implements `HeroRenderer`), `Skill*Effects.ts`, `SkillIndicators.ts`, `IndicatorGeometry.ts`, `AttackEffects.ts`, `StatusIndicators.ts`, `TargetingView.ts`, `DynamicResolution.ts`, `gpu.ts` |
-| UI (DOM) | `Lobby.ts`, `UsernameField.ts` (username input, per-name keys in localStorage), `RoomList.ts`, `HeroPicker.ts`, `Hud.ts`, `SkillBar.ts`, `MatchHud.ts` (end screen, rematch, back to menu), `SpectatorHud.ts`, `Minimap.ts`, `CombatFeedback.ts`, `FloatingNumbers.ts`, `ReconnectOverlay.ts`; CSS next to them |
+| render (Three.js) | `SceneRenderer.ts` (camera, scene), `ArenaView.ts`, `BushView.ts`, `VisionFog.ts`, `MeshHeroRenderer.ts` + `HeroShapes.ts` (implements `HeroRenderer`), `UnitViews.ts` (base/turret/creep meshes + HP bars), `Skill*Effects.ts`, `SkillIndicators.ts`, `IndicatorGeometry.ts`, `AttackEffects.ts`, `StatusIndicators.ts`, `TargetingView.ts`, `DynamicResolution.ts`, `gpu.ts` |
+| UI (DOM) | `Lobby.ts`, `UsernameField.ts` (username input, per-name keys in localStorage), `RoomList.ts`, `HeroPicker.ts`, `HeroIcon.ts` (SVG shape icons), `HeroInfoPanel.ts` + `HeroInfoButton.ts` (I key / HUD button), `Hud.ts`, `SkillBar.ts`, `MatchHud.ts` (end screen, rematch, back to menu), `QuitButton.ts` (in-game quit), `GameInfo.ts` (hold Tab: score + K/D/A), `SpectatorHud.ts`, `Minimap.ts`, `CombatFeedback.ts`, `FloatingNumbers.ts`, `ReconnectOverlay.ts`; CSS next to them |
 | audio | `audio/Sfx.ts` (generated sounds) |
 
 ## Where to change what
@@ -74,6 +77,7 @@ npm workspaces: `shared` (`@moba/shared`, imported by both sides), `server`, `cl
 - Snapshot field: `SnapshotMessage` in `protocol.ts`, filled in `DuelRoom.baseSnapshot`/`visiblePlayer`, read in `Game.onSnapshot`.
 - Match rules/numbers: `shared/src/constants.ts`, phase logic in `MatchController.ts`.
 - Map/bushes: `shared/src/map.ts`; visuals `ArenaView.ts`, `BushView.ts`, `Minimap.ts`.
+- Base/turret/creeps: numbers and positions in `shared/src/lane.ts`, behaviour in `server/src/units/UnitSystem.ts`, wiring (attacks, vision, snapshot `units`) in `DuelRoom.ts`, visuals `UnitViews.ts`.
 - Lag/smoothness: `SnapshotBuffer.ts`, `LocalPredictor.ts`, `INTERPOLATION_DELAY_MS`; GPU load: `DynamicResolution.ts`.
 
 ## Rules of the design

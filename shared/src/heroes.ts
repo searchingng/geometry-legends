@@ -12,6 +12,10 @@ export type HeroShape =
   | "star"
   | "spike";
 
+export const HERO_ROLES = ["Mage", "Assassin", "Fighter", "Tank", "Support", "Marksman"] as const;
+
+export type HeroRole = (typeof HERO_ROLES)[number];
+
 export interface HeroVisual {
   shape: HeroShape;
   color: number;
@@ -20,7 +24,7 @@ export interface HeroVisual {
 export interface HeroDefinition {
   id: string;
   name: string;
-  role: string;
+  roles: readonly [HeroRole] | readonly [HeroRole, HeroRole];
   description: string;
   radius: number;
   moveSpeed: number;
@@ -37,10 +41,10 @@ export const HEROES = {
   blade: {
     id: "blade",
     name: "Blade",
-    role: "Assassin",
+    roles: ["Assassin"],
     description: "Fastest hero. Small and slippery.",
     radius: 22,
-    moveSpeed: 300,
+    moveSpeed: 240,
     visionRange: 420,
     maxHp: 520,
     attackDamage: 70,
@@ -52,10 +56,10 @@ export const HEROES = {
   bastion: {
     id: "bastion",
     name: "Bastion",
-    role: "Tank",
+    roles: ["Tank"],
     description: "Big and slow, built to hold ground.",
     radius: 26,
-    moveSpeed: 240,
+    moveSpeed: 192,
     visionRange: 380,
     maxHp: 900,
     attackDamage: 55,
@@ -67,10 +71,10 @@ export const HEROES = {
   nova: {
     id: "nova",
     name: "Nova",
-    role: "Mage",
+    roles: ["Mage"],
     description: "Balanced caster with a light frame.",
     radius: 22,
-    moveSpeed: 270,
+    moveSpeed: 216,
     visionRange: 460,
     maxHp: 560,
     attackDamage: 60,
@@ -82,10 +86,10 @@ export const HEROES = {
   warden: {
     id: "warden",
     name: "Warden",
-    role: "Support",
+    roles: ["Support", "Tank"],
     description: "Steady protector, solid all-rounder.",
     radius: 24,
-    moveSpeed: 255,
+    moveSpeed: 204,
     visionRange: 500,
     maxHp: 680,
     attackDamage: 50,
@@ -97,10 +101,10 @@ export const HEROES = {
   vesper: {
     id: "vesper",
     name: "Vesper",
-    role: "Marksman",
+    roles: ["Marksman"],
     description: "Fragile sharpshooter with the longest reach.",
     radius: 21,
-    moveSpeed: 265,
+    moveSpeed: 212,
     visionRange: 520,
     maxHp: 480,
     attackDamage: 62,
@@ -112,10 +116,10 @@ export const HEROES = {
   kael: {
     id: "kael",
     name: "Kael",
-    role: "Fighter",
+    roles: ["Fighter"],
     description: "Relentless duelist who wins long brawls.",
     radius: 23,
-    moveSpeed: 280,
+    moveSpeed: 224,
     visionRange: 420,
     maxHp: 720,
     attackDamage: 68,
@@ -127,10 +131,10 @@ export const HEROES = {
   mira: {
     id: "mira",
     name: "Mira",
-    role: "Controller",
+    roles: ["Mage", "Support"],
     description: "Locks down space with rings and stasis.",
     radius: 22,
-    moveSpeed: 260,
+    moveSpeed: 208,
     visionRange: 480,
     maxHp: 580,
     attackDamage: 55,
@@ -142,10 +146,10 @@ export const HEROES = {
   goliath: {
     id: "goliath",
     name: "Goliath",
-    role: "Juggernaut",
+    roles: ["Tank", "Fighter"],
     description: "Huge and stubborn; hard to kill, hard to escape.",
     radius: 27,
-    moveSpeed: 230,
+    moveSpeed: 184,
     visionRange: 380,
     maxHp: 1000,
     attackDamage: 58,
@@ -157,10 +161,10 @@ export const HEROES = {
   wisp: {
     id: "wisp",
     name: "Wisp",
-    role: "Trickster",
+    roles: ["Assassin", "Support"],
     description: "Blinks in and out, exposing hidden enemies.",
     radius: 21,
-    moveSpeed: 290,
+    moveSpeed: 232,
     visionRange: 460,
     maxHp: 540,
     attackDamage: 66,
@@ -172,10 +176,10 @@ export const HEROES = {
   hex: {
     id: "hex",
     name: "Hex",
-    role: "Burst Mage",
+    roles: ["Mage", "Assassin"],
     description: "Slow, delayed spells that hit very hard.",
     radius: 22,
-    moveSpeed: 260,
+    moveSpeed: 208,
     visionRange: 480,
     maxHp: 500,
     attackDamage: 58,
