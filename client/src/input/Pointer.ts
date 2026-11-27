@@ -5,7 +5,9 @@ export class Pointer {
   private clientX: number | undefined;
   private clientY: number | undefined;
   private leftClicked = false;
-  private readonly leftClickListeners = new Set<() => void>();
+  private leftDown = false;
+  private readonly leftClickListeners = new Set<() => boolean>();
+  private readonly rightButtonListeners = new Set<(down: boolean) => void>();
 
   constructor(
     private readonly scene: SceneRenderer,
@@ -15,14 +17,29 @@ export class Pointer {
       this.clientX = event.clientX;
       this.clientY = event.clientY;
     });
-    target.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || isInteractiveElement(event.target)) return;
+    // Pointer events report a second button pressed while another is held only as pointermove, so per-button mouse events are used.
+    target.addEventListener("mousedown", (event) => {
+      if (isInteractiveElement(event.target)) return;
       this.clientX = event.clientX;
       this.clientY = event.clientY;
-      this.leftClicked = true;
-      for (const listener of this.leftClickListeners) listener();
+      if (event.button === 0) {
+        if (this.notifyLeftClick()) return;
+        this.leftClicked = true;
+        this.leftDown = true;
+      } else if (event.button === 2) {
+        this.notifyRightButton(true);
+      }
     });
+    target.addEventListener("mouseup", (event) => {
+      if (event.button === 0) this.leftDown = false;
+      else if (event.button === 2) this.notifyRightButton(false);
+    });
+    target.addEventListener("blur", () => (this.leftDown = false));
     target.addEventListener("contextmenu", (event) => event.preventDefault());
+  }
+
+  leftHeld(): boolean {
+    return this.leftDown;
   }
 
   worldPoint(): Vec2 | undefined {
@@ -36,9 +53,24 @@ export class Pointer {
     return clicked;
   }
 
-  onLeftClick(listener: () => void): () => void {
-    this.leftClickListeners.add(listener);
-    return () => this.leftClickListeners.delete(listener);
+  onLeftClick(handled: () => boolean): () => void {
+    this.leftClickListeners.add(handled);
+    return () => this.leftClickListeners.delete(handled);
+  }
+
+  private notifyLeftClick(): boolean {
+    let handled = false;
+    for (const listener of this.leftClickListeners) handled = listener() || handled;
+    return handled;
+  }
+
+  onRightButton(listener: (down: boolean) => void): () => void {
+    this.rightButtonListeners.add(listener);
+    return () => this.rightButtonListeners.delete(listener);
+  }
+
+  private notifyRightButton(down: boolean) {
+    for (const listener of this.rightButtonListeners) listener(down);
   }
 }
 

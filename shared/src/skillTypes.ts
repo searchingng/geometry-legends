@@ -32,7 +32,9 @@ export interface SkillZone {
 export type SkillDelivery =
   | { type: "instant" }
   | { type: "projectile"; speed: number }
-  | { type: "dash"; distance: number; speed: number };
+  | { type: "dash"; distance: number; speed: number; wallMode: DashWallMode };
+
+export type DashWallMode = "block" | "pass";
 
 export type SkillAim = "direction" | "point" | "none";
 

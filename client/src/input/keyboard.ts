@@ -2,7 +2,7 @@ const LEFT = new Set(["KeyA", "ArrowLeft"]);
 const RIGHT = new Set(["KeyD", "ArrowRight"]);
 const UP = new Set(["KeyW", "ArrowUp"]);
 const DOWN = new Set(["KeyS", "ArrowDown"]);
-const ATTACK = new Set(["Space", "KeyJ"]);
+const ATTACK = new Set(["Space"]);
 const GAME_KEYS = new Set([...LEFT, ...RIGHT, ...UP, ...DOWN, ...ATTACK]);
 
 export class Keyboard {

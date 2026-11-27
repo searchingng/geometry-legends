@@ -20,6 +20,7 @@ const CONSENTED_CLOSE_CODE = 4000;
 const RECONNECT_WINDOW_MS = 20_000;
 const FIRST_RETRY_MS = 250;
 const MAX_RETRY_MS = 2000;
+const LEAVE_TIMEOUT_MS = 1500;
 const TOKEN_KEY_PREFIX = "moba.reconnect.";
 
 export function connectionOptionsFromEnvironment(): ConnectionOptions {
@@ -161,7 +162,7 @@ export class Connection {
     this.leaving = true;
     clearToken(this.room.roomId);
     try {
-      await this.room.leave(true);
+      await Promise.race([this.room.leave(true), wait(LEAVE_TIMEOUT_MS)]);
     } catch {
       return;
     }

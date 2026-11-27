@@ -133,6 +133,7 @@ export class CombatFeedback {
     }
 
     const mine = sourceId === this.myId;
+    if (!mine && !this.heroIds.has(sourceId)) return;
     this.numbers.spawn(targetId, `${amount}`, mine ? "dealt" : "neutral", viewPosition);
     if (mine) this.sfx.play("hitLanded");
   }
@@ -174,7 +175,8 @@ export class CombatFeedback {
 
   private heroName(playerId: string): string {
     const heroId = this.heroIds.get(playerId);
-    return heroId ? getHero(heroId).name : "an enemy";
+    if (heroId) return getHero(heroId).name;
+    return playerId.startsWith("turret") ? "a turret" : "creeps";
   }
 
   private maxHp(playerId: string): number {

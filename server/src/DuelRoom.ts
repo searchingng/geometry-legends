@@ -2,6 +2,8 @@ import { Room, type AuthContext, type Client } from "colyseus";
 import {
   ALREADY_IN_ROOM,
   ARENA,
+  FOUNTAIN_HEAL_FRACTION_PER_SECOND,
+  FOUNTAIN_RADIUS,
   INPUT_BUFFER_TICKS,
   MAX_PLAYERS,
   MAX_QUEUED_INPUTS,
@@ -15,6 +17,7 @@ import {
   SPAWN_PROTECTION_MS,
   TICK_DT,
   TICK_MS,
+  UNIT_STATS,
   canSeePosition,
   chooseAttackTarget,
   getHero,
@@ -23,8 +26,10 @@ import {
   isCastSkillMessage,
   isHeroId,
   isUserKey,
+  isStructureKind,
   isValidMoveInput,
   normalizeUsername,
+  opposingTeam,
   sameUsername,
   shapeHits,
   stepMovement,
@@ -36,6 +41,7 @@ import {
   type MoveInput,
   type SkillShape,
   type SnapshotMessage,
+  type Team,
   type Vec2,
   type VisiblePlayer,
 } from "@moba/shared";
@@ -60,6 +66,7 @@ import {
   type ZoneVisibility,
 } from "./skills/SkillSystem.js";
 import { MatchController, type MatchTransition } from "./match/MatchController.js";
+import { UnitSystem, type Unit, type UnitHero, type UnitWorld } from "./units/UnitSystem.js";
 import { recordMatch, services } from "./db/services.js";
 import { clientIp } from "./http/json.js";
 
@@ -119,6 +126,7 @@ export class DuelRoom extends Room {
   private readonly vision = new VisionSystem();
   private readonly skills = new SkillSystem<SpawnedPlayer>();
   private readonly match = new MatchController();
+  private readonly units = new UnitSystem({ baseDestroyed: (team) => this.onBaseDestroyed(team) });
   private events: CombatEvent[] = [];
   private lineup: MatchLineup | null = null;
   private tick = 0;
@@ -222,6 +230,7 @@ export class DuelRoom extends Room {
   private removePlayer(playerId: string) {
     this.players.delete(playerId);
     this.vision.clearRevealsInvolving(playerId);
+    this.units.forget(playerId);
     this.skills.removeActor(playerId);
     this.applyTransition(this.match.forfeit(playerId), this.spawnedPlayers());
     if (this.players.size === 0) this.closeEmptyRoom();
@@ -340,6 +349,7 @@ export class DuelRoom extends Room {
     }
 
     if (this.match.allowsGameplay) {
+      for (const player of spawned) this.healAtFountain(player);
       const world = this.skillWorld(spawned);
       for (const player of spawned) {
         const cast = player.pendingCast;
@@ -347,6 +357,7 @@ export class DuelRoom extends Room {
         if (cast) this.skills.cast(player, cast.slot, cast.aim, world);
       }
       this.skills.update(world);
+      this.units.update(this.unitWorld(spawned));
     }
 
     for (const player of spawned) {
@@ -379,6 +390,7 @@ export class DuelRoom extends Room {
     if (transition === "countdown") {
       this.lineup = null;
       this.resetForMatch(spawned);
+      this.units.reset();
     }
     if (transition === "playing") {
       this.lineup = {
@@ -386,6 +398,7 @@ export class DuelRoom extends Room {
         players: spawned.map(({ id, slot, name, heroId }) => ({ id, slot, name, heroId })),
       };
       for (const player of spawned) this.protect(player);
+      this.units.startWaves(this.tick);
     }
     if (transition === "ended") {
       for (const player of spawned) {
@@ -456,31 +469,76 @@ export class DuelRoom extends Room {
     };
     const viewer = { ...attacker, visionRange: hero.visionRange };
 
-    const candidates = spawned
+    const heroCandidates = spawned
       .filter((candidate) => candidate.id !== attacker.id && isAlive(candidate))
       .filter((candidate) => !isProtected(candidate.status, this.tick))
-      .filter((candidate) => this.vision.canSee(viewer, candidate))
+      .filter((candidate) => this.vision.canSee(viewer, candidate) || this.units.teamSees(attacker.slot, candidate.position))
       .map((candidate) => ({
         id: candidate.id,
         position: candidate.position,
         radius: getHero(candidate.heroId).radius,
-        player: candidate,
+        player: candidate as SpawnedPlayer | undefined,
       }));
-    const target = chooseAttackTarget(reach, candidates, attacker.attackAim ?? undefined)?.player;
+    const unitCandidates = this.units
+      .hostileTargets(attacker.slot)
+      .filter((unit) => isStructureKind(unit.kind) || this.teamCanSee(attacker, unit.position))
+      .map((unit) => ({ id: unit.id, position: unit.position, radius: UNIT_STATS[unit.kind].radius, player: undefined }));
+    const target = chooseAttackTarget(reach, [...heroCandidates, ...unitCandidates], attacker.attackAim ?? undefined);
     if (!target) return;
 
     attacker.nextAttackTick = this.tick + Math.ceil(hero.attackCooldownMs / TICK_MS);
     attacker.status.protectedUntilTick = 0;
     this.events.push({ kind: "hit", attackerId: attacker.id, targetId: target.id, damage: hero.attackDamage });
-    this.damage(target, hero.attackDamage, attacker);
+    if (target.player) this.damage(target.player, hero.attackDamage, attacker);
+    else this.units.damage(target.id, hero.attackDamage, attacker.id);
   }
 
   private damage(target: SpawnedPlayer, amount: number, source: SpawnedPlayer): DamageResult {
     if (isProtected(target.status, this.tick)) return { dealt: 0, absorbed: 0 };
     const result = dealDamage(target, amount, this.tick);
     this.vision.reveal(source.id, target.id, this.tick, ATTACKER_REVEAL_TICKS);
-    if (target.hp === 0) this.kill(target, source);
+    if (source.id !== target.id) this.units.callForHelp(unitHero(source), target.position, this.tick);
+    if (target.hp === 0) this.kill(target, source.id);
     return result;
+  }
+
+  private damageFromUnit(heroId: string, amount: number, source: Unit) {
+    const target = this.players.get(heroId);
+    if (!target || !isSpawned(target) || !isAlive(target) || isProtected(target.status, this.tick)) return;
+    dealDamage(target, amount, this.tick);
+    if (target.hp === 0) this.kill(target, source.id);
+  }
+
+  private unitWorld(spawned: SpawnedPlayer[]): UnitWorld {
+    return {
+      tick: this.tick,
+      heroes: spawned.filter((player) => isAlive(player) && !isProtected(player.status, this.tick)).map(unitHero),
+      damageHero: (heroId, amount, source) => this.damageFromUnit(heroId, amount, source),
+      emit: (event) => this.events.push(event),
+    };
+  }
+
+  private teamCanSee(viewer: SpawnedPlayer, point: Vec2): boolean {
+    return (
+      (isAlive(viewer) && canSeePosition(ARENA, viewer.position, getHero(viewer.heroId).visionRange, point)) ||
+      this.units.teamSees(viewer.slot, point)
+    );
+  }
+
+  private healAtFountain(player: SpawnedPlayer) {
+    if (!isAlive(player)) return;
+    const spawn = ARENA.spawns[player.slot];
+    const dx = player.position.x - spawn.x;
+    const dy = player.position.y - spawn.y;
+    if (dx * dx + dy * dy > FOUNTAIN_RADIUS * FOUNTAIN_RADIUS) return;
+    const maxHp = getHero(player.heroId).maxHp;
+    player.hp = Math.min(maxHp, player.hp + maxHp * FOUNTAIN_HEAL_FRACTION_PER_SECOND * TICK_DT);
+  }
+
+  private onBaseDestroyed(team: Team) {
+    const spawned = this.spawnedPlayers();
+    const winner = spawned.find((player) => player.slot === opposingTeam(team));
+    if (winner) this.applyTransition(this.match.recordBaseDestroyed(winner.id), spawned);
   }
 
   private skillWorld(spawned: SpawnedPlayer[]): SkillWorld<SpawnedPlayer> {
@@ -489,12 +547,17 @@ export class DuelRoom extends Room {
       actors: spawned,
       isAlive,
       damage: (target, amount, source) => this.damage(target, amount, source),
+      creepsHostileTo: (caster) =>
+        this.units
+          .hostileCreeps(caster.slot)
+          .map((unit) => ({ id: unit.id, position: unit.position, radius: UNIT_STATS[unit.kind].radius })),
+      damageCreep: (creepId, amount, source) => this.units.damage(creepId, amount, source.id),
       reveal: (targetId, viewerId, ticks) => this.vision.reveal(targetId, viewerId, this.tick, ticks),
       emit: (event) => this.events.push(event),
     };
   }
 
-  private kill(player: SpawnedPlayer, killer: SpawnedPlayer) {
+  private kill(player: SpawnedPlayer, killerId: string) {
     player.respawnAtTick = this.tick + RESPAWN_TICKS;
     player.inputQueue = [];
     player.awaitingInputBuffer = true;
@@ -502,8 +565,9 @@ export class DuelRoom extends Room {
     resetStatus(player.status);
     this.skills.cancelDash(player.id);
     this.vision.clearRevealsInvolving(player.id);
-    this.events.push({ kind: "death", playerId: player.id, killerId: killer.id });
-    this.applyTransition(this.match.recordKill(killer.id), this.spawnedPlayers());
+    this.units.forget(player.id);
+    this.events.push({ kind: "death", playerId: player.id, killerId });
+    this.applyTransition(this.match.recordKill(killerId, player.id), this.spawnedPlayers());
   }
 
   private respawn(player: SpawnedPlayer) {
@@ -517,7 +581,7 @@ export class DuelRoom extends Room {
   }
 
   private spawnedPlayers(): SpawnedPlayer[] {
-    return [...this.players.values()].filter((player): player is SpawnedPlayer => player.heroId !== null);
+    return [...this.players.values()].filter(isSpawned);
   }
 
   private takeInputs(player: ServerPlayer): MoveInput[] {
@@ -540,17 +604,20 @@ export class DuelRoom extends Room {
   private snapshotFor(viewerId: string, spawned: SpawnedPlayer[]): SnapshotMessage {
     const viewer = spawned.find((player) => player.id === viewerId);
     const sighted = viewer !== undefined && isAlive(viewer) ? viewer : undefined;
+    const pointVisible = (point: Vec2) => viewer !== undefined && this.teamCanSee(viewer, point);
     const canSee = (target: SpawnedPlayer) =>
       target.id === viewerId ||
-      (sighted !== undefined &&
-        isAlive(target) &&
-        this.vision.canSee({ ...sighted, visionRange: getHero(sighted.heroId).visionRange }, target));
+      (isAlive(target) &&
+        ((sighted !== undefined &&
+          this.vision.canSee({ ...sighted, visionRange: getHero(sighted.heroId).visionRange }, target)) ||
+          (viewer !== undefined && this.units.teamSees(viewer.slot, target.position))));
 
     const visible = spawned.filter(canSee);
-    const visibleIds = new Set(visible.map((player) => player.id));
+    const units = this.units.visibleUnits(
+      (unit) => viewer === undefined || unit.team === viewer.slot || isStructureKind(unit.kind) || pointVisible(unit.position),
+    );
+    const visibleIds = new Set([...visible.map((player) => player.id), ...units.map((unit) => unit.id)]);
 
-    const pointVisible = (point: Vec2) =>
-      sighted !== undefined && canSeePosition(ARENA, sighted.position, getHero(sighted.heroId).visionRange, point);
     const landsOnViewer = (shape: SkillShape, origin: Vec2, direction: Vec2) =>
       sighted !== undefined && shapeHits(shape, origin, direction, sighted.position, getHero(sighted.heroId).radius);
     const projectileVisible: PointVisibility = (point, casterId) => casterId === viewerId || pointVisible(point);
@@ -592,6 +659,7 @@ export class DuelRoom extends Room {
     });
 
     const snapshot = this.baseSnapshot(spawned, visible, viewerId);
+    if (units.length > 0) snapshot.units = units;
     if (events.length > 0) snapshot.events = events;
     const projectiles = this.skills.visibleProjectiles(projectileVisible);
     if (projectiles.length > 0) snapshot.projectiles = projectiles;
@@ -603,6 +671,7 @@ export class DuelRoom extends Room {
   private spectatorSnapshot(spawned: SpawnedPlayer[]): SnapshotMessage {
     const snapshot = this.baseSnapshot(spawned, spawned.filter(isAlive), "");
     snapshot.spectating = true;
+    snapshot.units = this.units.visibleUnits(() => true);
     if (this.events.length > 0) snapshot.events = [...this.events];
     const projectiles = this.skills.visibleProjectiles(() => true);
     if (projectiles.length > 0) snapshot.projectiles = projectiles;
@@ -615,7 +684,7 @@ export class DuelRoom extends Room {
     return {
       tick: this.tick,
       playersInRoom: this.players.size,
-      roster: spawned.map((player) => ({ id: player.id, heroId: player.heroId, name: player.name })),
+      roster: spawned.map((player) => ({ id: player.id, heroId: player.heroId, name: player.name, team: player.slot })),
       visible: visible.map((player) => this.visiblePlayer(player, viewerId)),
       match: this.match.view(
         this.tick,
@@ -649,6 +718,14 @@ function restartInputSequence(player: ServerPlayer) {
   player.awaitingInputBuffer = true;
   player.lastQueuedSeq = 0;
   player.lastProcessedSeq = 0;
+}
+
+function isSpawned(player: ServerPlayer): player is SpawnedPlayer {
+  return player.heroId !== null;
+}
+
+function unitHero(player: SpawnedPlayer): UnitHero {
+  return { id: player.id, team: player.slot, position: player.position, radius: getHero(player.heroId).radius };
 }
 
 function isAlive(player: ServerPlayer): boolean {

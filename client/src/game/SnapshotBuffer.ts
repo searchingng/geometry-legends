@@ -31,7 +31,9 @@ export class SnapshotBuffer {
     let older: Vec2 | undefined;
     let olderTick = 0;
     for (const snapshot of this.snapshots) {
-      const player = snapshot.visible.find((candidate) => candidate.id === playerId);
+      const player =
+        snapshot.visible.find((candidate) => candidate.id === playerId) ??
+        snapshot.units?.find((candidate) => candidate.id === playerId);
 
       if (snapshot.tick <= renderTick) {
         older = player;

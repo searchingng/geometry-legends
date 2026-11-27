@@ -39,14 +39,26 @@ export function stepMovement(
     y: position.y + direction.y * distance,
   };
 
-  for (const wall of map.walls) {
-    next = pushOutOfRect(next, stats.radius, wall);
-  }
+  return settleOutOfWalls(next, stats.radius, map);
+}
 
+export function settleOutOfWalls(position: Vec2, radius: number, map: GameMap): Vec2 {
+  let next = position;
+  for (const wall of map.walls) {
+    next = pushOutOfRect(next, radius, wall);
+  }
   return {
-    x: clamp(next.x, stats.radius, map.width - stats.radius),
-    y: clamp(next.y, stats.radius, map.height - stats.radius),
+    x: clamp(next.x, radius, map.width - radius),
+    y: clamp(next.y, radius, map.height - radius),
   };
+}
+
+export function overlapsWall(position: Vec2, radius: number, map: GameMap): boolean {
+  return map.walls.some((wall) => {
+    const dx = position.x - clamp(position.x, wall.x, wall.x + wall.width);
+    const dy = position.y - clamp(position.y, wall.y, wall.y + wall.height);
+    return dx * dx + dy * dy < radius * radius;
+  });
 }
 
 function pushOutOfRect(center: Vec2, radius: number, rect: Rect): Vec2 {

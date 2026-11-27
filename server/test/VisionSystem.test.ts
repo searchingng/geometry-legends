@@ -144,8 +144,8 @@ describe("VisionSystem", () => {
 
     it("uses ARENA walls by default", () => {
       const arena = new VisionSystem();
-      expect(arena.canSee({ ...viewer("alice", 700, 450), visionRange: 400 }, target("bob", 900, 450))).toBe(false);
-      expect(arena.canSee({ ...viewer("alice", 700, 330), visionRange: 400 }, target("bob", 900, 330))).toBe(true);
+      expect(arena.canSee({ ...viewer("alice", 500, 610), visionRange: 400 }, target("bob", 760, 610))).toBe(false);
+      expect(arena.canSee({ ...viewer("alice", 500, 330), visionRange: 400 }, target("bob", 760, 330))).toBe(true);
     });
   });
 });

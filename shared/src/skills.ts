@@ -8,7 +8,7 @@ export const SKILLS = {
     cooldownMs: 6000,
     aim: "direction",
     range: 220,
-    delivery: { type: "dash", distance: 220, speed: 1100 },
+    delivery: { type: "dash", distance: 220, speed: 1100, wallMode: "pass" },
     zones: [
       {
         kind: "damage",
@@ -65,7 +65,7 @@ export const SKILLS = {
     cooldownMs: 8000,
     aim: "direction",
     range: 200,
-    delivery: { type: "dash", distance: 200, speed: 900 },
+    delivery: { type: "dash", distance: 200, speed: 900, wallMode: "block" },
     zones: [
       {
         kind: "control",
@@ -274,7 +274,7 @@ export const SKILLS = {
     cooldownMs: 7000,
     aim: "direction",
     range: 170,
-    delivery: { type: "dash", distance: 170, speed: 1000 },
+    delivery: { type: "dash", distance: 170, speed: 1000, wallMode: "pass" },
     zones: [
       {
         kind: "utility",
@@ -313,7 +313,7 @@ export const SKILLS = {
     cooldownMs: 6000,
     aim: "direction",
     range: 190,
-    delivery: { type: "dash", distance: 190, speed: 1000 },
+    delivery: { type: "dash", distance: 190, speed: 1000, wallMode: "block" },
     zones: [
       {
         kind: "damage",
@@ -497,7 +497,7 @@ export const SKILLS = {
     cooldownMs: 16000,
     aim: "point",
     range: 320,
-    delivery: { type: "dash", distance: 320, speed: 800 },
+    delivery: { type: "dash", distance: 320, speed: 800, wallMode: "pass" },
     zones: [
       {
         kind: "control",
@@ -518,7 +518,7 @@ export const SKILLS = {
     cooldownMs: 5500,
     aim: "direction",
     range: 210,
-    delivery: { type: "dash", distance: 210, speed: 1400 },
+    delivery: { type: "dash", distance: 210, speed: 1400, wallMode: "pass" },
     zones: [
       {
         kind: "damage",
@@ -561,7 +561,7 @@ export const SKILLS = {
     cooldownMs: 14000,
     aim: "direction",
     range: 260,
-    delivery: { type: "dash", distance: 260, speed: 1200 },
+    delivery: { type: "dash", distance: 260, speed: 1200, wallMode: "pass" },
     zones: [
       {
         kind: "damage",

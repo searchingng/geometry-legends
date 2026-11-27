@@ -24,15 +24,26 @@ describe("MatchController", () => {
 
   it("ends when a player reaches the kill target", () => {
     const match = playing();
-    expect(match.recordKill("a")).toBeNull();
-    expect(match.recordKill("a")).toBe("ended");
+    expect(match.recordKill("a", "b")).toBeNull();
+    expect(match.recordKill("a", "b")).toBe("ended");
     expect(match.winnerId).toBe("a");
     expect(match.view(10, []).endReason).toBe("kills");
   });
 
+  it("counts deaths for the victim", () => {
+    const match = playing();
+    match.recordKill("a", "b");
+    match.recordKill("b", "a");
+    match.recordKill("b", "a");
+    expect(match.view(10, []).scores).toEqual([
+      { id: "a", kills: 1, deaths: 2, assists: 0 },
+      { id: "b", kills: 2, deaths: 1, assists: 0 },
+    ]);
+  });
+
   it("ends on time with the leader or a draw", () => {
     const lead = playing();
-    lead.recordKill("b");
+    lead.recordKill("b", "a");
     expect(lead.update(103, PLAYERS)).toBe("ended");
     expect(lead.winnerId).toBe("b");
 
@@ -51,14 +62,27 @@ describe("MatchController", () => {
 
   it("restarts only when both players vote for a rematch", () => {
     const match = playing();
-    match.recordKill("a");
-    match.recordKill("a");
+    match.recordKill("a", "b");
+    match.recordKill("a", "b");
     expect(match.voteRematch("a", 20, PLAYERS)).toBeNull();
     expect(match.view(20, []).rematchVotes).toEqual(["a"]);
     expect(match.voteRematch("b", 21, PLAYERS)).toBe("countdown");
     expect(match.view(21, []).scores).toEqual([
-      { id: "a", kills: 0 },
-      { id: "b", kills: 0 },
+      { id: "a", kills: 0, deaths: 0, assists: 0 },
+      { id: "b", kills: 0, deaths: 0, assists: 0 },
     ]);
+  });
+
+  it("ends when a base is destroyed", () => {
+    const match = playing();
+    expect(match.recordBaseDestroyed("b")).toBe("ended");
+    expect(match.winnerId).toBe("b");
+    expect(match.view(10, []).endReason).toBe("base");
+  });
+
+  it("counts deaths caused by units without awarding kills", () => {
+    const match = playing();
+    expect(match.recordKill("turret1", "a")).toBeNull();
+    expect(match.view(10, []).scores[0]).toEqual({ id: "a", kills: 0, deaths: 1, assists: 0 });
   });
 });

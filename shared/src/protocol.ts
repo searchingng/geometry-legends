@@ -1,4 +1,5 @@
 import type { HeroId } from "./heroes.js";
+import type { Team, UnitKind } from "./lane.js";
 import type { Vec2 } from "./math.js";
 import type { ForcedMotion } from "./skillMotion.js";
 import type { SkillId } from "./skills.js";
@@ -51,6 +52,7 @@ export interface RosterEntry {
   id: string;
   heroId: HeroId;
   name: string;
+  team: Team;
 }
 
 export interface VisiblePlayer {
@@ -62,6 +64,15 @@ export interface VisiblePlayer {
   respawnTicks?: number;
   skillCooldownTicks?: [number, number, number];
   statuses?: PlayerStatuses;
+}
+
+export interface VisibleUnit {
+  id: string;
+  kind: UnitKind;
+  team: Team;
+  x: number;
+  y: number;
+  hp: number;
 }
 
 export interface PlayerStatuses {
@@ -88,11 +99,13 @@ export interface StatusAppliedEvent {
 }
 
 export type MatchPhase = "waiting" | "countdown" | "playing" | "ended";
-export type MatchEndReason = "kills" | "time" | "forfeit";
+export type MatchEndReason = "kills" | "base" | "time" | "forfeit";
 
 export interface MatchScore {
   id: string;
   kills: number;
+  deaths: number;
+  assists: number;
 }
 
 export interface MatchState {
@@ -195,6 +208,7 @@ export interface SnapshotMessage {
   events?: CombatEvent[];
   projectiles?: VisibleProjectile[];
   zones?: VisibleZone[];
+  units?: VisibleUnit[];
   match?: MatchState;
   spectating?: true;
   spectators?: number;

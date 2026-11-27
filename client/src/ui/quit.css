@@ -1,0 +1,17 @@
+.quit-button {
+  position: fixed;
+  top: 62px;
+  right: 14px;
+  padding: 4px 10px;
+  border-color: rgba(255, 120, 120, 0.6);
+  background: rgba(0, 0, 0, 0.45);
+  color: #ffb3b3;
+  font-size: 12px;
+  z-index: 30;
+}
+
+.quit-button.quit-confirm {
+  border-color: #ff6b6b;
+  background: rgba(120, 20, 20, 0.85);
+  color: #fff;
+}

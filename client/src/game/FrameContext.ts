@@ -1,4 +1,4 @@
-import type { HeroId, SkillSlot, SnapshotMessage, Vec2, VisiblePlayer } from "@moba/shared";
+import type { HeroId, SkillSlot, SnapshotMessage, TargetCandidate, Vec2, VisiblePlayer } from "@moba/shared";
 import type { PositionLookup } from "../render/AttackEffects.js";
 import type { Connection } from "../net/Connection.js";
 import type { Keyboard } from "../input/keyboard.js";
@@ -32,6 +32,7 @@ export interface FrameContext {
   spectating: boolean;
   inputLocked: boolean;
   enemies: VisibleEnemy[];
+  unitTargets: TargetCandidate[];
   viewPosition: PositionLookup;
 }
 
